@@ -1,0 +1,195 @@
+:root {
+  --bg: rgba(20, 20, 24, 0.92);
+  --fg: #f2f2f5;
+  --sub: #9a9aa6;
+  --idle: #6b6b78;
+  --running: #3b82f6;
+  --needs: #f5a623;
+  --done: #34c759;
+  --error: #ff453a;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  user-select: none;
+}
+
+html,
+body {
+  background: transparent;
+  overflow: hidden;
+  font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+}
+
+body {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 6px;
+}
+
+/* 胶囊主体 */
+.pill {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--bg);
+  color: var(--fg);
+  border-radius: 22px;
+  padding: 8px 16px;
+  min-height: 40px;
+  max-width: 400px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: all 0.25s ease;
+  cursor: grab;
+}
+
+.pill:active {
+  cursor: grabbing;
+}
+
+/* 状态圆点 */
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--idle);
+  transition: background 0.25s ease;
+}
+
+.pill[data-status="running"] .dot {
+  background: var(--running);
+  animation: pulse 1.4s infinite;
+}
+.pill[data-status="needs_input"] .dot {
+  background: var(--needs);
+  animation: pulse 0.9s infinite;
+}
+.pill[data-status="completed"] .dot {
+  background: var(--done);
+}
+.pill[data-status="error"] .dot {
+  background: var(--error);
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.4;
+    transform: scale(0.7);
+  }
+}
+
+.content {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+  flex: 1;
+}
+
+.line1 {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.name {
+  flex-shrink: 0;
+}
+
+.task {
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sep {
+  color: var(--sub);
+}
+
+.line2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--sub);
+  margin-top: 1px;
+  min-height: 0;
+}
+
+.line2:empty {
+  display: none;
+}
+
+.status-text {
+  font-weight: 500;
+}
+.pill[data-status="completed"] .status-text {
+  color: var(--done);
+}
+.pill[data-status="needs_input"] .status-text {
+  color: var(--needs);
+}
+.pill[data-status="error"] .status-text {
+  color: var(--error);
+}
+
+.timer {
+  font-variant-numeric: tabular-nums;
+}
+
+/* 按钮区：默认隐藏，needs_input 时显示 */
+.actions {
+  display: none;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.pill[data-status="needs_input"] .actions {
+  display: flex;
+}
+
+.btn {
+  border: none;
+  border-radius: 12px;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.1s ease, opacity 0.15s ease;
+}
+
+.btn:active {
+  transform: scale(0.94);
+}
+
+.btn.allow {
+  background: var(--done);
+  color: #04210d;
+}
+
+.btn.deny {
+  background: rgba(255, 255, 255, 0.14);
+  color: var(--fg);
+}
+
+.btn.acked {
+  opacity: 0.5;
+  pointer-events: none;
+}

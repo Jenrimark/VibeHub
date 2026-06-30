@@ -1,0 +1,8 @@
+# 依赖与构建产物
+node_modules/
+src-tauri/target/
+src-tauri/gen/
+
+# 系统
+Thumbs.db
+.DS_Store

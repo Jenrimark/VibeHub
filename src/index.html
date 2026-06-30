@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="zh">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>VibeHub</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <!-- 灵动岛胶囊。data-status 驱动配色。 -->
+    <div id="pill" class="pill idle" data-status="idle" data-tauri-drag-region>
+      <div class="dot" id="dot"></div>
+      <div class="content" data-tauri-drag-region>
+        <div class="line1">
+          <span class="name" id="name">VibeHub</span>
+          <span class="sep" id="sep">·</span>
+          <span class="task" id="task">idle</span>
+        </div>
+        <div class="line2" id="line2">
+          <span class="status-text" id="statusText"></span>
+          <span class="timer" id="timer"></span>
+        </div>
+      </div>
+      <!-- 需操作时显示的按钮区（MVP 仅 UI 反馈，不回写）。 -->
+      <div class="actions" id="actions">
+        <button class="btn allow" id="allowBtn">Allow</button>
+        <button class="btn deny" id="denyBtn">Deny</button>
+      </div>
+    </div>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
