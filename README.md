@@ -42,7 +42,7 @@ VibeHub/
 ```powershell
 cd D:\CODE\VibeHub
 npm install           # 安装 Tauri CLI
-npm run tauri dev     # 启动开发模式（顶部出现胶囊 + 托盘图标）
+   # 启动开发模式（顶部出现胶囊 + 托盘图标）
 ```
 
 > 首次 `dev`/`build` 会编译 Rust 依赖，耗时较长属正常。

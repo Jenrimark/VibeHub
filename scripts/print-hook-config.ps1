@@ -10,6 +10,8 @@ $config = @{
     hooks = @{
         SessionStart     = @(@{ hooks = @(@{ type = "command"; command = $cmd }) })
         UserPromptSubmit = @(@{ hooks = @(@{ type = "command"; command = $cmd }) })
+        PreToolUse       = @(@{ hooks = @(@{ type = "command"; command = $cmd }) })
+        PostToolUse      = @(@{ hooks = @(@{ type = "command"; command = $cmd }) })
         Notification     = @(@{ hooks = @(@{ type = "command"; command = $cmd }) })
         Stop             = @(@{ hooks = @(@{ type = "command"; command = $cmd }) })
         SessionEnd       = @(@{ hooks = @(@{ type = "command"; command = $cmd }) })
