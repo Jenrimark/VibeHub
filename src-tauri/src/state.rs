@@ -36,6 +36,8 @@ pub struct AgentState {
     /// 进入 Running 的 unix 秒；前端据此本地累加计时。
     pub started_at: Option<i64>,
     pub message: String,
+    /// 当前待审批的 decision_id，无则为 None。
+    pub decision_id: Option<String>,
 }
 
 impl AgentState {
@@ -47,6 +49,7 @@ impl AgentState {
             status: AgentStatus::Idle,
             started_at: None,
             message: String::new(),
+            decision_id: None,
         }
     }
 
@@ -75,12 +78,22 @@ impl AgentState {
             AgentStatus::Idle => {
                 self.started_at = None;
                 self.task.clear();
+                self.decision_id = None;
             }
             // 完成/错误/需输入保留计时起点，前端可继续显示用时。
             _ => {}
         }
         self.status = status;
     }
+}
+
+/// 审批决定结果。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Decision {
+    Pending,
+    Allowed,
+    Denied,
 }
 
 /// hook 推送过来的事件载荷。除 event_type 外均可选。
@@ -95,6 +108,9 @@ pub struct IncomingEvent {
     pub task: Option<String>,
     #[serde(default)]
     pub message: Option<String>,
+    /// 需要审批时由 hook 生成并附带，用于关联用户决定。
+    #[serde(default)]
+    pub decision_id: Option<String>,
 }
 
 impl IncomingEvent {
@@ -111,6 +127,10 @@ impl IncomingEvent {
 #[derive(Debug, Default)]
 pub struct AppState {
     pub agents: HashMap<String, AgentState>,
+    /// 待审批决定：decision_id -> Decision。
+    pub decisions: HashMap<String, Decision>,
+    /// 当前活跃的 decision_id（供前端展示）。
+    pub active_decision_id: Option<String>,
 }
 
 impl AppState {
@@ -123,7 +143,51 @@ impl AppState {
             .entry(id.clone())
             .or_insert_with(|| AgentState::new(&id, &default_name));
         agent.apply(ev, now);
+
+        // 若附带 decision_id，登记为 Pending 并记为当前活跃。
+        // 仅在新 decision_id 时插入，不覆盖已决定的结果。
+        if let Some(did) = &ev.decision_id {
+            if !did.is_empty() {
+                self.decisions.entry(did.clone()).or_insert(Decision::Pending);
+                self.active_decision_id = Some(did.clone());
+                agent.decision_id = Some(did.clone());
+            }
+        } else if ev.event_type != "needs_input" {
+            // 非审批事件时清空活跃 decision_id。
+            self.active_decision_id = None;
+        }
+
         agent.clone()
+    }
+
+    /// 用户提交决定，返回是否找到该 decision_id。
+    /// 决策完成后同时清除 active_decision_id 和对应 agent 的 decision_id。
+    pub fn submit_decision(&mut self, decision_id: &str, decision: Decision) -> bool {
+        if let Some(d) = self.decisions.get_mut(decision_id) {
+            *d = decision;
+            // 清除活跃 decision_id。
+            if self.active_decision_id.as_deref() == Some(decision_id) {
+                self.active_decision_id = None;
+            }
+            // 清除持有该 decision_id 的 agent 状态。
+            for agent in self.agents.values_mut() {
+                if agent.decision_id.as_deref() == Some(decision_id) {
+                    agent.decision_id = None;
+                    break;
+                }
+            }
+            true
+        } else {
+            false
+        }
+    }
+
+    /// 查询决定结果。
+    pub fn get_decision(&self, decision_id: &str) -> Decision {
+        self.decisions
+            .get(decision_id)
+            .copied()
+            .unwrap_or(Decision::Pending)
     }
 }
 
@@ -146,6 +210,7 @@ mod tests {
             agent_name: None,
             task: None,
             message: None,
+            decision_id: None,
         }
     }
 
@@ -204,5 +269,30 @@ mod tests {
     #[test]
     fn default_agent_id_is_claude() {
         assert_eq!(ev("running").agent_id(), "claude");
+    }
+
+    #[test]
+    fn decision_not_overwritten_by_duplicate_event() {
+        let mut app = AppState::default();
+
+        // 第一个事件：提交 decision_id，应为 Pending
+        let mut e1 = ev("needs_input");
+        e1.decision_id = Some("abc123".into());
+        app.handle(&e1, 100);
+        assert_eq!(app.decisions.get("abc123"), Some(&Decision::Pending));
+
+        // 用户已批准
+        app.submit_decision("abc123", Decision::Allowed);
+        assert_eq!(app.decisions.get("abc123"), Some(&Decision::Allowed));
+
+        // 重复/迟到事件：不应把已决定的结果覆盖回 Pending
+        let mut e2 = ev("needs_input");
+        e2.decision_id = Some("abc123".into());
+        app.handle(&e2, 200);
+        assert_eq!(
+            app.decisions.get("abc123"),
+            Some(&Decision::Allowed),
+            "已决定的 decision 不应被重复事件覆盖"
+        );
     }
 }
