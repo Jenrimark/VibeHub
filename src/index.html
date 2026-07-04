@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -7,26 +7,62 @@
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
-    <!-- 灵动岛胶囊。data-status 驱动配色。 -->
-    <div id="pill" class="pill idle" data-status="idle" data-tauri-drag-region>
-      <div class="dot" id="dot"></div>
-      <div class="content" data-tauri-drag-region>
-        <div class="line1">
-          <span class="name" id="name">VibeHub</span>
-          <span class="sep" id="sep">·</span>
-          <span class="task" id="task">idle</span>
+    <!-- 主视图：胶囊 -->
+    <div id="mainView" class="main-view">
+      <!-- 灵动岛胶囊。data-status 驱动配色。 -->
+      <div id="pill" class="pill" data-status="idle" data-tauri-drag-region role="status" aria-live="polite">
+        <div class="dot" id="dot"></div>
+        <div class="content" data-tauri-drag-region>
+          <div class="line1">
+            <span class="name" id="name">VibeHub</span>
+            <span class="sep" id="sep">·</span>
+            <span class="task" id="task">idle</span>
+          </div>
+          <div class="line2" id="line2">
+            <span class="status-text" id="statusText"></span>
+            <span class="timer" id="timer"></span>
+          </div>
         </div>
-        <div class="line2" id="line2">
-          <span class="status-text" id="statusText"></span>
-          <span class="timer" id="timer"></span>
+        <!-- 需操作时显示的按钮区（MVP 仅 UI 反馈，不回写）。 -->
+        <div class="actions" id="actions">
+          <button class="btn allow" id="allowBtn" aria-label="Allow">Allow</button>
+          <button class="btn deny" id="denyBtn" aria-label="Deny">Deny</button>
         </div>
-      </div>
-      <!-- 需操作时显示的按钮区（MVP 仅 UI 反馈，不回写）。 -->
-      <div class="actions" id="actions">
-        <button class="btn allow" id="allowBtn">Allow</button>
-        <button class="btn deny" id="denyBtn">Deny</button>
       </div>
     </div>
+
+    <!-- 右键上下文菜单 -->
+    <div id="contextMenu" class="context-menu hidden" role="menu">
+      <button class="ctx-item" data-action="settings" role="menuitem">⚙️ 设置</button>
+    </div>
+
+    <!-- 设置页面（全页面视图，取代胶囊） -->
+    <div id="settingsPage" class="settings-page" role="dialog" aria-label="Settings">
+      <div class="settings-header">
+        <span class="settings-title">Settings</span>
+        <button class="settings-close" id="settingsClose" aria-label="Close settings">✕</button>
+      </div>
+      <div class="setting-item">
+        <label>Port</label>
+        <input type="text" id="settPort" value="51789" readonly />
+      </div>
+      <div class="setting-item">
+        <label>Hook Path</label>
+        <input type="text" id="settHookPath" value="..." readonly class="setting-path" />
+      </div>
+      <div class="setting-item">
+        <label for="settAlwaysOnTop">Always on Top</label>
+        <label class="toggle">
+          <input type="checkbox" id="settAlwaysOnTop" />
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="setting-item">
+        <label>Version</label>
+        <span class="setting-value">0.1.0</span>
+      </div>
+    </div>
+
     <script type="module" src="app.js"></script>
   </body>
 </html>
