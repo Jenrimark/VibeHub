@@ -35,11 +35,11 @@ fn cors_headers_header() -> Header {
 }
 
 fn text_header() -> Header {
-    Header::from_bytes(&b"Content-Type"[..], &b"text/plain"[..]).unwrap()
+    Header::from_bytes(&b"Content-Type"[..], &b"text/plain; charset=utf-8"[..]).unwrap()
 }
 
 fn json_header() -> Header {
-    Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap()
+    Header::from_bytes(&b"Content-Type"[..], &b"application/json; charset=utf-8"[..]).unwrap()
 }
 
 /// 在后台线程启动 HTTP 服务。

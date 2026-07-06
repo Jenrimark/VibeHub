@@ -8,11 +8,17 @@ $ErrorActionPreference = "SilentlyContinue"
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $OutputEncoding = [System.Text.Encoding]::UTF8
 
+# 强制 PowerShell 5.1 使用 UTF-8 发送 HTTP 请求体
+# （PS 5.1 的 Invoke-RestMethod 默认用系统编码，中文 Windows 上是 GBK）
+$script:Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+
 $port = 51789
 $baseUrl = "http://127.0.0.1:$port"
 
 # 读取 stdin（Claude 传入的事件 JSON）
-$raw = [Console]::In.ReadToEnd()
+# 显式用 UTF-8 解码，避免中文 Windows 上 [Console]::In 默认用 GBK 读取导致乱码
+$utf8 = New-Object System.Text.UTF8Encoding($false)
+$raw = [System.IO.StreamReader]::new([Console]::OpenStandardInput(), $utf8).ReadToEnd()
 
 $hookEvent = ""
 $task = ""
@@ -175,9 +181,11 @@ if ($agentType)       { $payload["agent_type"]        = $agentType }
 if ($isInterrupt)     { $payload["is_interrupt"]      = $true }
 
 try {
-    Invoke-RestMethod -Uri "$baseUrl/event" -Method Post `
-        -Body ($payload | ConvertTo-Json -Compress) `
-        -ContentType "application/json" -TimeoutSec 2 | Out-Null
+    $json = $payload | ConvertTo-Json -Compress
+    $body = $script:Utf8NoBom.GetBytes($json)
+    Invoke-WebRequest -Uri "$baseUrl/event" -Method Post `
+        -Body $body `
+        -ContentType "application/json; charset=utf-8" -TimeoutSec 2 | Out-Null
 } catch {
     # VibeHub 未运行，直接允许
     exit 0
