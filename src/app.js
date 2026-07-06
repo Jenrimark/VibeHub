@@ -25,7 +25,7 @@ const STATUS_LABEL = {
   error: "⚠ Error",
 };
 
-let current = { status: "idle", startedAt: null, decisionId: null };
+let current = { status: "idle", startedAt: null, decisionId: null, connected: null };
 
 function fmtElapsed(startedAt) {
   if (!startedAt) return "";
@@ -41,13 +41,21 @@ function render(state) {
     status: state.status,
     startedAt: state.started_at,
     decisionId: state.decision_id || null,
+    connected: current.connected, // 保留连接状态
   };
 
   els.pill.dataset.status = state.status;
 
+  // 更新连接状态指示（仅 idle 时显示）。
+  if (state.status === "idle" && current.connected === false) {
+    els.pill.dataset.connected = "false";
+  } else if (current.connected !== null) {
+    els.pill.dataset.connected = current.connected ? "true" : "false";
+  }
+
   if (state.status === "idle") {
     els.name.textContent = "VibeHub";
-    els.task.textContent = "idle";
+    els.task.textContent = current.connected === false ? "未连接" : "idle";
     els.sep.style.display = "";
     els.statusText.textContent = "";
     els.timer.textContent = "";
@@ -117,6 +125,11 @@ function bindTauri() {
       els.allowBtn.disabled = false;
       els.denyBtn.disabled = false;
       render(e.payload);
+
+      // 需要审批时自动弹出窗口到前台。
+      if (e.payload.status === "needs_input" && e.payload.decision_id) {
+        window.__TAURI__.core.invoke("focus_window").catch(() => {});
+      }
     });
     // 监听后端服务启动失败。
     tauri.event.listen("server-error", (e) => {
@@ -130,6 +143,39 @@ function bindTauri() {
       });
       console.error("[VibeHub] server-error:", e.payload);
     });
+
+    // 监听 hooks 配置状态。
+    tauri.event.listen("hooks-status", (e) => {
+      const { configured, hook_path } = e.payload;
+      current.connected = configured;
+      const hookStatusEl = document.getElementById("hookStatus");
+      if (hookStatusEl) {
+        hookStatusEl.textContent = configured ? "✅ Connected" : "⚠ Not configured";
+        hookStatusEl.style.color = configured ? "#34c759" : "#f5a623";
+      }
+      // 未连接时更新 idle 胶囊外观。
+      if (current.status === "idle" && !configured) {
+        els.pill.dataset.connected = "false";
+      } else {
+        els.pill.dataset.connected = "true";
+      }
+      console.log("[VibeHub] hooks-status:", configured ? "已配置" : "未配置", hook_path);
+    });
+
+    // 监听启动时发现的活跃会话。
+    tauri.event.listen("session-discovered", (e) => {
+      const session = e.payload;
+      console.log("[VibeHub] 发现活跃会话:", session.project, session.session_id);
+      // 将发现的会话渲染为 running 状态。
+      render({
+        status: "running",
+        agent_name: "Claude",
+        task: session.last_task,
+        started_at: session.last_activity || null,
+        message: session.project,
+        decision_id: null,
+      });
+    });
     return true;
   }
   return false;
@@ -138,8 +184,8 @@ function bindTauri() {
 if (!bindTauri()) {
   let tries = 0;
   const t = setInterval(() => {
-    if (bindTauri() || ++tries > 20) clearInterval(t);
-  }, 100);
+    if (bindTauri() || ++tries > 100) clearInterval(t);
+  }, 200);  // 总共等待 20 秒，兼容慢速初始化
 }
 
 render({ status: "idle", agent_name: "VibeHub", task: "idle", started_at: null, message: "", decision_id: null });

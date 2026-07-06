@@ -61,11 +61,16 @@ impl AgentState {
                 self.agent_name = name.clone();
             }
         }
+        // 仅在 task/message 非空时更新，避免 hook 发送空字符串时清空 UI 显示。
         if let Some(task) = &ev.task {
-            self.task = task.clone();
+            if !task.is_empty() {
+                self.task = task.clone();
+            }
         }
         if let Some(msg) = &ev.message {
-            self.message = msg.clone();
+            if !msg.is_empty() {
+                self.message = msg.clone();
+            }
         }
         match status {
             // 进入 Running 时（且此前未在计时）记录起点。
@@ -197,6 +202,16 @@ fn capitalize(s: &str) -> String {
         None => String::new(),
         Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
     }
+}
+
+/// 启动时发现的活跃会话信息，emit 给前端。
+#[derive(Debug, Clone, Serialize)]
+pub struct DiscoveredSession {
+    pub session_id: String,
+    pub project: String,
+    pub last_task: String,
+    pub last_activity: i64,
+    pub status: String,
 }
 
 #[cfg(test)]

@@ -83,9 +83,10 @@ $payload = @{
     agent_id   = "claude"
     agent_name = "Claude"
     event_type = $eventType
-    task       = $task
-    message    = $message
 }
+# 仅在非空时添加可选字段，避免覆盖 UI 已显示的内容。
+if ($task)    { $payload["task"]    = $task }
+if ($message) { $payload["message"] = $message }
 if ($decisionId) { $payload["decision_id"] = $decisionId }
 
 try {

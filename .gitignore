@@ -2,6 +2,8 @@
 node_modules/
 src-tauri/target/
 src-tauri/gen/
+open-vibe-island-main/
+docs/
 
 # 系统
 Thumbs.db

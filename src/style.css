@@ -412,3 +412,13 @@ body {
 .hidden {
   display: none !important;
 }
+
+/* 未连接状态：idle 但 hooks 未配置时，圆点变黄慢闪 */
+.pill[data-connected="false"] .dot {
+  background: var(--needs) !important;
+  animation: pulse 2s infinite !important;
+}
+
+.pill[data-connected="false"] .task {
+  color: var(--needs);
+}
