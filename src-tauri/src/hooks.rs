@@ -129,8 +129,15 @@ pub fn ensure_hooks_configured() -> (bool, String) {
         "UserPromptSubmit",
         "PreToolUse",
         "PostToolUse",
+        "PostToolUseFailure",
+        "PermissionRequest",
+        "PermissionDenied",
         "Notification",
         "Stop",
+        "StopFailure",
+        "SubagentStart",
+        "SubagentStop",
+        "PreCompact",
         "SessionEnd",
     ];
 

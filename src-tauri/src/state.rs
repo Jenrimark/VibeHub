@@ -38,6 +38,22 @@ pub struct AgentState {
     pub message: String,
     /// 当前待审批的 decision_id，无则为 None。
     pub decision_id: Option<String>,
+    // --- 全活动监控新增字段 ---
+    /// 当前正在执行的工具名（如 "Edit"、"Bash"），工具完成后清空。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_tool: Option<String>,
+    /// 工具输入预览（如文件路径、命令内容）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_preview: Option<String>,
+    /// 最后一条助手消息（Stop 时提取）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_message: Option<String>,
+    /// 错误信息（PostToolUseFailure / StopFailure）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    /// 原始 hook 事件名（如 "PreToolUse"、"SubagentStart"）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hook_event: Option<String>,
 }
 
 impl AgentState {
@@ -50,12 +66,19 @@ impl AgentState {
             started_at: None,
             message: String::new(),
             decision_id: None,
+            current_tool: None,
+            tool_preview: None,
+            last_message: None,
+            error: None,
+            hook_event: None,
         }
     }
 
     /// 应用一个事件，推进状态机。`now` 为当前 unix 秒（便于测试注入）。
     pub fn apply(&mut self, ev: &IncomingEvent, now: i64) {
         let status = AgentStatus::from_event(&ev.event_type);
+        let hook_event = ev.hook_event_name.clone();
+
         if let Some(name) = &ev.agent_name {
             if !name.is_empty() {
                 self.agent_name = name.clone();
@@ -72,23 +95,170 @@ impl AgentState {
                 self.message = msg.clone();
             }
         }
-        match status {
-            // 进入 Running 时（且此前未在计时）记录起点。
-            AgentStatus::Running => {
-                if self.status != AgentStatus::Running || self.started_at.is_none() {
-                    self.started_at = Some(now);
+
+        // 更新 hook_event（始终记录最新的原始事件名）。
+        self.hook_event = hook_event.clone();
+
+        // ============ preservesActionableState 保护 ============
+        // 审批等待期间，普通的 running 事件（PostToolUse、SubagentStart/Stop 等）
+        // 不应覆盖 needs_input 状态。只更新元信息，不改变 status。
+        // 但新的审批请求（event_type == "needs_input"）允许覆盖。
+        let is_new_needs_input = status == AgentStatus::NeedsInput;
+        let is_activity_event = matches!(
+            hook_event.as_deref(),
+            Some("PreToolUse")
+                | Some("PostToolUse")
+                | Some("Notification")
+                | Some("SubagentStart")
+                | Some("SubagentStop")
+                | Some("PreCompact")
+        );
+        if is_activity_event
+            && self.status == AgentStatus::NeedsInput
+            && self.decision_id.is_some()
+            && !is_new_needs_input
+        {
+            // 只更新 tool_preview 等辅助信息，保持 needs_input 不变。
+            self.update_tool_context(ev);
+            return;
+        }
+
+        // ============ 按 hook_event_name 精细化映射 ============
+        // 先用 event_type 设定默认状态，match 块可按需覆盖。
+        self.status = status;
+
+        // 当 event_type 已明确为 needs_input/error 时，优先信任它，
+        // 因为这是 hook 脚本经过业务逻辑（写工具判断、PermissionRequest 等）
+        // 映射后的结果，比 hook_event_name 更精确。
+        match hook_event.as_deref() {
+            // 工具开始：记录当前工具名和预览。
+            Some("PreToolUse") => {
+                // event_type 为 needs_input 时信任 hook 的映射（审批场景）。
+                if status != AgentStatus::NeedsInput {
+                    self.status = AgentStatus::Running;
+                }
+                self.update_tool_context(ev);
+                self.error = None;
+            }
+            // 工具完成：清除当前工具，更新 message 为完成摘要。
+            Some("PostToolUse") => {
+                self.status = AgentStatus::Running;
+                self.current_tool = None;
+                if let Some(preview) = &ev.response_preview {
+                    if !preview.is_empty() {
+                        self.message = format!("done: {}", preview);
+                    }
+                }
+                self.tool_preview = None;
+                self.error = None;
+            }
+            // 工具失败：进入 Error 状态。
+            Some("PostToolUseFailure") => {
+                self.status = AgentStatus::Error;
+                self.current_tool = None;
+                self.error = ev.error.clone();
+                self.message = ev
+                    .error
+                    .clone()
+                    .unwrap_or_else(|| "Tool failed".to_string());
+            }
+            // 权限请求：需要用户输入。
+            Some("PermissionRequest") => {
+                self.status = AgentStatus::NeedsInput;
+                self.update_tool_context(ev);
+            }
+            // 权限被拒绝：回到 running。
+            Some("PermissionDenied") => {
+                self.status = AgentStatus::Running;
+            }
+            // 通知：有消息体时需要用户注意。
+            Some("Notification") => {
+                // 保持当前状态，除非消息非空（由 hook 映射为 needs_input）。
+                if status == AgentStatus::NeedsInput {
+                    self.status = AgentStatus::NeedsInput;
+                }
+                self.update_tool_context(ev);
+            }
+            // Subagent 开始：更新 task 信息。
+            Some("SubagentStart") => {
+                self.status = AgentStatus::Running;
+                if let Some(at) = &ev.agent_type {
+                    if !at.is_empty() {
+                        self.task = format!("Subagent: {}", at);
+                    }
                 }
             }
-            // 回到空闲清空任务与计时。
-            AgentStatus::Idle => {
+            // Subagent 结束：保持 running。
+            Some("SubagentStop") => {
+                // 不改变状态，只记录事件。
+            }
+            // Stop / StopFailure：会话完成。
+            Some("Stop") => {
+                self.status = AgentStatus::Completed;
+                self.current_tool = None;
+                self.last_message = ev.last_message.clone();
+            }
+            Some("StopFailure") => {
+                self.status = AgentStatus::Error;
+                self.current_tool = None;
+                self.error = ev.error.clone();
+                self.message = ev
+                    .error
+                    .clone()
+                    .unwrap_or_else(|| "Stop failed".to_string());
+            }
+            // SessionEnd：回到空闲。
+            Some("SessionEnd") => {
+                self.status = AgentStatus::Idle;
                 self.started_at = None;
                 self.task.clear();
                 self.decision_id = None;
+                self.current_tool = None;
+                self.tool_preview = None;
+                self.last_message = None;
+                self.error = None;
             }
-            // 完成/错误/需输入保留计时起点，前端可继续显示用时。
+            // 其他 / 未知：使用 event_type 映射的状态。
+            _ => {
+                self.status = status;
+                match status {
+                    AgentStatus::Idle => {
+                        self.started_at = None;
+                        self.task.clear();
+                        self.decision_id = None;
+                    }
+                    _ => {}
+                }
+                self.update_tool_context(ev);
+            }
+        }
+
+        // 计时逻辑：仅在状态实际变化时处理。
+        match self.status {
+            AgentStatus::Running => {
+                if self.started_at.is_none() {
+                    self.started_at = Some(now);
+                }
+            }
+            AgentStatus::Idle => {
+                self.started_at = None;
+            }
             _ => {}
         }
-        self.status = status;
+    }
+
+    /// 更新工具上下文信息（current_tool、tool_preview）。
+    fn update_tool_context(&mut self, ev: &IncomingEvent) {
+        if let Some(tool) = &ev.tool_name {
+            if !tool.is_empty() {
+                self.current_tool = Some(tool.clone());
+            }
+        }
+        if let Some(preview) = &ev.tool_preview {
+            if !preview.is_empty() {
+                self.tool_preview = Some(preview.clone());
+            }
+        }
     }
 }
 
@@ -116,6 +286,32 @@ pub struct IncomingEvent {
     /// 需要审批时由 hook 生成并附带，用于关联用户决定。
     #[serde(default)]
     pub decision_id: Option<String>,
+    // --- 全活动监控新增字段 ---
+    /// 原始 hook 事件名（如 "PreToolUse"、"PostToolUse"、"SubagentStart"）。
+    #[serde(default)]
+    pub hook_event_name: Option<String>,
+    /// 当前工具名（如 "Write"、"Bash"）。
+    #[serde(default)]
+    pub tool_name: Option<String>,
+    /// 工具输入预览（hook 脚本提取的摘要）。
+    #[serde(default)]
+    pub tool_preview: Option<String>,
+    /// 工具响应预览。
+    #[serde(default)]
+    pub response_preview: Option<String>,
+    /// 错误信息。
+    #[serde(default)]
+    pub error: Option<String>,
+    /// 最后一条助手消息。
+    #[serde(default)]
+    pub last_message: Option<String>,
+    /// subagent 类型。
+    #[serde(default)]
+    pub agent_type: Option<String>,
+    /// 是否中断（hook 发送，预留供 UI 展示）。
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub is_interrupt: Option<bool>,
 }
 
 impl IncomingEvent {
@@ -226,7 +422,21 @@ mod tests {
             task: None,
             message: None,
             decision_id: None,
+            hook_event_name: None,
+            tool_name: None,
+            tool_preview: None,
+            response_preview: None,
+            error: None,
+            last_message: None,
+            agent_type: None,
+            is_interrupt: None,
         }
+    }
+
+    fn ev_with_hook(t: &str, hook: &str) -> IncomingEvent {
+        let mut e = ev(t);
+        e.hook_event_name = Some(hook.to_string());
+        e
     }
 
     #[test]
@@ -309,5 +519,117 @@ mod tests {
             Some(&Decision::Allowed),
             "已决定的 decision 不应被重复事件覆盖"
         );
+    }
+
+    // ===== 全活动监控新测试 =====
+
+    #[test]
+    fn pre_tool_use_records_current_tool() {
+        let mut app = AppState::default();
+        let mut e = ev_with_hook("running", "PreToolUse");
+        e.tool_name = Some("Edit".into());
+        e.tool_preview = Some("src/main.rs".into());
+        let s = app.handle(&e, 100);
+        assert_eq!(s.status, AgentStatus::Running);
+        assert_eq!(s.current_tool, Some("Edit".into()));
+        assert_eq!(s.tool_preview, Some("src/main.rs".into()));
+    }
+
+    #[test]
+    fn post_tool_use_clears_current_tool() {
+        let mut app = AppState::default();
+        // 先触发 PreToolUse
+        let mut e1 = ev_with_hook("running", "PreToolUse");
+        e1.tool_name = Some("Edit".into());
+        app.handle(&e1, 100);
+
+        // PostToolUse 清除 current_tool
+        let mut e2 = ev_with_hook("running", "PostToolUse");
+        e2.response_preview = Some("3 lines changed".into());
+        let s = app.handle(&e2, 110);
+        assert_eq!(s.current_tool, None);
+        assert_eq!(s.message, "done: 3 lines changed");
+    }
+
+    #[test]
+    fn post_tool_use_failure_sets_error() {
+        let mut app = AppState::default();
+        let mut e = ev_with_hook("error", "PostToolUseFailure");
+        e.error = Some("Permission denied".into());
+        let s = app.handle(&e, 100);
+        assert_eq!(s.status, AgentStatus::Error);
+        assert_eq!(s.error, Some("Permission denied".into()));
+    }
+
+    #[test]
+    fn preserves_actionable_state() {
+        let mut app = AppState::default();
+
+        // 先触发一个写工具的 PreToolUse（hook 映射为 needs_input + decision_id）
+        let mut e1 = ev_with_hook("needs_input", "PreToolUse");
+        e1.decision_id = Some("dec001".into());
+        e1.tool_name = Some("Bash".into());
+        let s = app.handle(&e1, 100);
+        assert_eq!(s.status, AgentStatus::NeedsInput);
+        assert_eq!(s.decision_id, Some("dec001".into()));
+
+        // 后续的 PostToolUse（running，无 decision_id）不应覆盖 needs_input
+        // 这是真实的场景：hook 只在 PreToolUse 写工具时生成 decision_id
+        let mut e2 = ev_with_hook("running", "PostToolUse");
+        e2.tool_name = Some("Read".into());
+        let s = app.handle(&e2, 110);
+        assert_eq!(
+            s.status,
+            AgentStatus::NeedsInput,
+            "审批等待期间 running 事件不应覆盖 needs_input"
+        );
+        assert_eq!(s.decision_id, Some("dec001".into()));
+
+        // 新的审批请求（event_type = needs_input）应能覆盖
+        let mut e3 = ev_with_hook("needs_input", "PreToolUse");
+        e3.decision_id = Some("dec002".into());
+        e3.tool_name = Some("Write".into());
+        let s = app.handle(&e3, 120);
+        assert_eq!(s.status, AgentStatus::NeedsInput);
+        assert_eq!(s.decision_id, Some("dec002".into()));
+    }
+
+    #[test]
+    fn stop_extracts_last_message() {
+        let mut app = AppState::default();
+        let mut e = ev_with_hook("completed", "Stop");
+        e.last_message = Some("All tests passed.".into());
+        let s = app.handle(&e, 100);
+        assert_eq!(s.status, AgentStatus::Completed);
+        assert_eq!(s.last_message, Some("All tests passed.".into()));
+    }
+
+    #[test]
+    fn subagent_start_updates_task() {
+        let mut app = AppState::default();
+        let mut e = ev_with_hook("running", "SubagentStart");
+        e.agent_type = Some("code-reviewer".into());
+        let s = app.handle(&e, 100);
+        assert_eq!(s.status, AgentStatus::Running);
+        assert_eq!(s.task, "Subagent: code-reviewer");
+    }
+
+    #[test]
+    fn session_end_clears_everything() {
+        let mut app = AppState::default();
+
+        // 先设置一些状态
+        let mut e1 = ev_with_hook("running", "PreToolUse");
+        e1.tool_name = Some("Edit".into());
+        e1.tool_preview = Some("file.rs".into());
+        app.handle(&e1, 100);
+
+        // SessionEnd 清空所有
+        let s = app.handle(&ev_with_hook("idle", "SessionEnd"), 200);
+        assert_eq!(s.status, AgentStatus::Idle);
+        assert_eq!(s.started_at, None);
+        assert!(s.task.is_empty());
+        assert_eq!(s.current_tool, None);
+        assert_eq!(s.tool_preview, None);
     }
 }

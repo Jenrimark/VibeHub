@@ -25,6 +25,13 @@ const STATUS_LABEL = {
   error: "⚠ Error",
 };
 
+/// 提取文件路径的文件名部分（兼容 Windows/Unix 路径）。
+function basename(path) {
+  if (!path) return "";
+  const parts = path.replace(/\\/g, "/").split("/");
+  return parts[parts.length - 1] || path;
+}
+
 let current = { status: "idle", startedAt: null, decisionId: null, connected: null };
 
 function fmtElapsed(startedAt) {
@@ -62,10 +69,47 @@ function render(state) {
     els.line2.style.display = "none";
   } else {
     els.name.textContent = state.agent_name || "Agent";
-    const taskText = state.task || state.message || "...";
+
+    // 任务行：completed 时优先显示 last_message。
+    let taskText = state.task || state.message || "...";
+    if (state.status === "completed" && state.last_message) {
+      taskText = state.last_message.length > 60
+        ? state.last_message.slice(0, 57) + "..."
+        : state.last_message;
+    }
     els.task.textContent = taskText;
     els.sep.style.display = "";
-    const statusLabel = state.message || STATUS_LABEL[state.status] || "";
+
+    // 状态行：优先显示工具上下文 > 错误信息 > 状态标签。
+    let statusLabel = "";
+    if (state.status === "error" && state.error) {
+      statusLabel = state.error.length > 40
+        ? "⚠ " + state.error.slice(0, 37) + "..."
+        : "⚠ " + state.error;
+    } else if (state.current_tool) {
+      // 显示当前工具名 + 路径预览
+      const tool = state.current_tool;
+      const preview = state.tool_preview;
+      if (preview && (tool === "Write" || tool === "Edit" || tool === "MultiEdit")) {
+        statusLabel = tool + " → " + basename(preview);
+      } else if (preview && tool === "Bash") {
+        statusLabel = "Bash: " + (preview.length > 30 ? preview.slice(0, 27) + "..." : preview);
+      } else if (preview) {
+        statusLabel = tool + ": " + (preview.length > 30 ? preview.slice(0, 27) + "..." : preview);
+      } else {
+        statusLabel = tool;
+      }
+    } else if (state.hook_event === "SubagentStart") {
+      statusLabel = "Subagent started";
+    } else if (state.hook_event === "PostToolUse" && state.message) {
+      // 工具完成后的摘要
+      statusLabel = state.message.length > 40
+        ? state.message.slice(0, 37) + "..."
+        : state.message;
+    } else {
+      statusLabel = state.message || STATUS_LABEL[state.status] || "";
+    }
+
     const timerLabel = fmtElapsed(state.started_at);
     els.statusText.textContent = statusLabel;
     els.timer.textContent = timerLabel;
