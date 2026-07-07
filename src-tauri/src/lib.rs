@@ -99,6 +99,42 @@ fn focus_window(app: tauri::AppHandle) -> Result<(), String> {
     }
 }
 
+/// 打开设置窗口。若已存在则聚焦。
+#[tauri::command]
+fn open_settings(app: tauri::AppHandle) -> Result<(), String> {
+    use tauri::WebviewUrl;
+    use tauri::WebviewWindowBuilder;
+
+    // 如果设置窗口已存在，直接聚焦。
+    if let Some(w) = app.get_webview_window("settings") {
+        let _ = w.show();
+        let _ = w.set_focus();
+        return Ok(());
+    }
+
+    WebviewWindowBuilder::new(&app, "settings", WebviewUrl::App("settings.html".into()))
+        .title("VibeHub 设置")
+        .inner_size(680.0, 480.0)
+        .min_inner_size(520.0, 380.0)
+        .decorations(true)
+        .resizable(true)
+        .center()
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+/// 获取 hook 配置状态（供设置窗口使用）。
+#[tauri::command]
+fn get_hook_status() -> serde_json::Value {
+    let (_, hook_path) = hooks::ensure_hooks_configured();
+    serde_json::json!({
+        "configured": !hook_path.is_empty(),
+        "hook_path": hook_path
+    })
+}
+
 /// 扫描 ~/.claude/projects/*/sessions/*.jsonl，发现最近活跃的会话。
 /// 读取文件末尾 4KB 解析最后的 assistant 消息来推断任务。
 fn discover_sessions() -> Option<DiscoveredSession> {
@@ -339,7 +375,9 @@ pub fn run() {
             set_window_size,
             set_always_on_top,
             get_always_on_top,
-            focus_window
+            focus_window,
+            open_settings,
+            get_hook_status
         ])
         .setup(move |app| {
             let handle = app.handle().clone();

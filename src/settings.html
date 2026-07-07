@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>VibeHub 设置</title>
+    <link rel="stylesheet" href="settings.css" />
+  </head>
+  <body>
+    <!-- 左侧导航栏 -->
+    <nav class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <img class="sidebar-logo" src="../icons/32x32.png" alt="VibeHub" />
+        <span class="sidebar-title">VibeHub 设置</span>
+      </div>
+      <div class="sidebar-nav">
+        <button class="nav-item active" data-page="general">
+          <span class="nav-icon">⚙️</span>
+          <span class="nav-label">常规</span>
+        </button>
+        <button class="nav-item" data-page="hooks">
+          <span class="nav-icon">🔗</span>
+          <span class="nav-label">Hook 连接</span>
+        </button>
+        <button class="nav-item" data-page="window">
+          <span class="nav-icon">🖥️</span>
+          <span class="nav-label">窗口</span>
+        </button>
+        <button class="nav-item" data-page="about">
+          <span class="nav-icon">ℹ️</span>
+          <span class="nav-label">关于</span>
+        </button>
+      </div>
+    </nav>
+
+    <!-- 右侧内容区 -->
+    <main class="content" id="content">
+      <!-- 常规设置 -->
+      <section class="page active" id="page-general">
+        <h2 class="page-title">常规</h2>
+        <div class="setting-group">
+          <div class="setting-row">
+            <div class="setting-info">
+              <span class="setting-label">自动批准</span>
+              <span class="setting-desc">自动批准 Claude Code 的写操作请求，无需手动确认</span>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="settAutoApprove" />
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        </div>
+      </section>
+
+      <!-- Hook 连接 -->
+      <section class="page" id="page-hooks">
+        <h2 class="page-title">Hook 连接</h2>
+        <div class="setting-group">
+          <div class="setting-row">
+            <div class="setting-info">
+              <span class="setting-label">连接状态</span>
+              <span class="setting-desc">Claude Code Hook 是否已配置</span>
+            </div>
+            <span class="status-badge" id="hookStatus">检查中...</span>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info">
+              <span class="setting-label">监听端口</span>
+              <span class="setting-desc">VibeHub 本地 HTTP 服务端口</span>
+            </div>
+            <input type="text" class="setting-input" id="settPort" value="51789" readonly />
+          </div>
+          <div class="setting-row">
+            <div class="setting-info">
+              <span class="setting-label">Hook 脚本路径</span>
+              <span class="setting-desc">PowerShell hook 脚本位置</span>
+            </div>
+            <input type="text" class="setting-input wide" id="settHookPath" value="..." readonly />
+          </div>
+        </div>
+      </section>
+
+      <!-- 窗口设置 -->
+      <section class="page" id="page-window">
+        <h2 class="page-title">窗口</h2>
+        <div class="setting-group">
+          <div class="setting-row">
+            <div class="setting-info">
+              <span class="setting-label">窗口置顶</span>
+              <span class="setting-desc">胶囊窗口始终保持在最上层</span>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="settAlwaysOnTop" />
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        </div>
+      </section>
+
+      <!-- 关于 -->
+      <section class="page" id="page-about">
+        <h2 class="page-title">关于</h2>
+        <div class="setting-group">
+          <div class="setting-row">
+            <div class="setting-info">
+              <span class="setting-label">版本</span>
+            </div>
+            <span class="setting-value">0.1.0</span>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info">
+              <span class="setting-label">技术栈</span>
+            </div>
+            <span class="setting-value">Tauri 2 + WebView2</span>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info">
+              <span class="setting-label">项目</span>
+            </div>
+            <span class="setting-value">AI Agent 工作中心</span>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="settings.js"></script>
+  </body>
+</html>
