@@ -615,8 +615,6 @@ document.addEventListener("keydown", (e) => {
 });
 
 // ============== 设置页面（独立窗口） ==============
-let settingsVisible = false;
-
 function openSettings() {
   if (window.__TAURI__?.core?.invoke) {
     window.__TAURI__.core.invoke("open_settings").catch((e) => {
