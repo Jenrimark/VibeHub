@@ -1,6 +1,6 @@
 [package]
 name = "vibehub"
-version = "0.1.0"
+version = "0.2.0"
 description = "VibeHub - AI Agent 工作中心"
 authors = ["VibeHub"]
 edition = "2021"
