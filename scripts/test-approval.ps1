@@ -1,6 +1,6 @@
-# VibeHub 审批流程端到端测试
-# 验证指标：M1（事件接收率）、M2（Decision 注册）、M5（自动批准延迟）、M7（状态转换）
-# 用法：先启动 VibeHub（npm run tauri dev），再运行本脚本。
+# VibeHub Approval Flow End-to-End Test
+# Metrics: M1 (event receive), M2 (decision register), M5 (auto-approve), M7 (state transitions)
+# Usage: Start VibeHub (npm run tauri dev), then run this script.
 
 $url = "http://127.0.0.1:51789"
 $pass = 0
@@ -28,56 +28,54 @@ function Check-Decision($id) {
 
 function Assert($condition, $passMsg, $failMsg) {
     if ($condition) {
-        Write-Host "  ✅ PASS: $passMsg" -ForegroundColor Green
+        Write-Host "  PASS: $passMsg" -ForegroundColor Green
         $script:pass++
     } else {
-        Write-Host "  ❌ FAIL: $failMsg" -ForegroundColor Red
+        Write-Host "  FAIL: $failMsg" -ForegroundColor Red
         $script:fail++
     }
 }
 
-Write-Host "=== VibeHub 审批流程测试 ===" -ForegroundColor Cyan
+Write-Host "=== VibeHub Approval Flow Test ===" -ForegroundColor Cyan
 Write-Host ""
 
-# --- Step 1: 基础连通性 ---
-Write-Host "[Step 1] 基础连通性..." -ForegroundColor Yellow
+# --- Step 1: Connectivity ---
+Write-Host "[Step 1] Connectivity..." -ForegroundColor Yellow
 $ok = Send-Event @{ agent_id="claude"; agent_name="Claude"; event_type="running"; task="Connectivity test" }
-Assert $ok "POST /event 返回 ok" "无法连接 VibeHub — 是否在运行？"
+Assert $ok "POST /event returns ok" "Cannot connect to VibeHub - is it running?"
 
 if (-not $ok) {
-    Write-Host "`n❌ VibeHub 未运行，终止测试。" -ForegroundColor Red
+    Write-Host "`nVibeHub not running, aborting test." -ForegroundColor Red
     exit 1
 }
 
-# --- Step 2: Decision 注册 ---
-Write-Host "`n[Step 2] Decision 注册..." -ForegroundColor Yellow
+# --- Step 2: Decision registration ---
+Write-Host "`n[Step 2] Decision registration..." -ForegroundColor Yellow
 $decId = "test_$(Get-Random)"
 $ok = Send-Event @{
     agent_id="claude"; agent_name="Claude"; event_type="needs_input"
     task="Approval test"; message="Allow Write -> test.txt?"
     decision_id=$decId; hook_event_name="PreToolUse"; tool_name="Write"; tool_preview="test.txt"
 }
-Assert $ok "POST needs_input + decision_id 返回 ok" "POST needs_input 失败"
+Assert $ok "POST needs_input + decision_id returns ok" "POST needs_input failed"
 
-# 等待一小段时间让 auto-approve（如果开启）生效
 Start-Sleep -Milliseconds 200
 $result = Check-Decision $decId
-# 可能是 pending（未开 auto-approve）或 allowed（已开 auto-approve）
-Assert (($result -eq "pending") -or ($result -eq "allowed")) "GET /decision/$decId 返回 '$result' (pending 或 allowed)" "GET /decision/$decId 返回异常: $result"
+Assert (($result -eq "pending") -or ($result -eq "allowed")) "GET /decision/$decId returns '$result' (pending or allowed)" "GET /decision/$decId returned unexpected: $result"
 
-# --- Step 3: 无 decision_id 的 needs_input（回归测试） ---
-Write-Host "`n[Step 3] 回归：无 decision_id 的 needs_input..." -ForegroundColor Yellow
+# --- Step 3: Regression - needs_input without decision_id ---
+Write-Host "`n[Step 3] Regression: needs_input without decision_id..." -ForegroundColor Yellow
 $ok = Send-Event @{
     agent_id="claude"; agent_name="Claude"; event_type="needs_input"
     task="Regression test"; message="Notification without approval"
 }
-Assert $ok "不带 decision_id 的 needs_input 正确处理" "POST 失败"
+Assert $ok "needs_input without decision_id handled correctly" "POST failed"
 
-# --- Step 4: 完整生命周期 ---
-Write-Host "`n[Step 4] 完整生命周期..." -ForegroundColor Yellow
+# --- Step 4: Full lifecycle ---
+Write-Host "`n[Step 4] Full lifecycle..." -ForegroundColor Yellow
 
 $ok = Send-Event @{ agent_id="claude"; agent_name="Claude"; event_type="running"; task="Lifecycle test" }
-Assert $ok "running 事件发送成功" "running 事件失败"
+Assert $ok "running event sent" "running event failed"
 Start-Sleep -Milliseconds 300
 
 $decId2 = "lifecycle_$(Get-Random)"
@@ -86,18 +84,18 @@ $ok = Send-Event @{
     task="Lifecycle test"; message="Allow Edit -> main.rs?"
     decision_id=$decId2; hook_event_name="PreToolUse"; tool_name="Edit"; tool_preview="main.rs"
 }
-Assert $ok "needs_input 事件发送成功" "needs_input 事件失败"
+Assert $ok "needs_input event sent" "needs_input event failed"
 Start-Sleep -Milliseconds 300
 
 $ok = Send-Event @{ agent_id="claude"; agent_name="Claude"; event_type="completed"; task="Lifecycle test"; message="Done" }
-Assert $ok "completed 事件发送成功" "completed 事件失败"
+Assert $ok "completed event sent" "completed event failed"
 Start-Sleep -Milliseconds 300
 
 $ok = Send-Event @{ agent_id="claude"; agent_name="Claude"; event_type="idle" }
-Assert $ok "idle 事件发送成功" "idle 事件失败"
+Assert $ok "idle event sent" "idle event failed"
 
-# --- Step 5: 自动批准验证 ---
-Write-Host "`n[Step 5] 自动批准验证..." -ForegroundColor Yellow
+# --- Step 5: Auto-approve verification ---
+Write-Host "`n[Step 5] Auto-approve verification..." -ForegroundColor Yellow
 $decId3 = "auto_$(Get-Random)"
 $null = Send-Event @{
     agent_id="claude"; agent_name="Claude"; event_type="needs_input"
@@ -105,7 +103,6 @@ $null = Send-Event @{
     decision_id=$decId3; hook_event_name="PreToolUse"; tool_name="Bash"; tool_preview="npm test"
 }
 
-# 轮询最多 2 秒
 $deadline = (Get-Date).AddSeconds(2)
 $finalDecision = "pending"
 while ((Get-Date) -lt $deadline) {
@@ -118,24 +115,25 @@ while ((Get-Date) -lt $deadline) {
 }
 
 if ($finalDecision -eq "allowed") {
-    Write-Host "  ✅ PASS: auto-approve 生效，decision 在 2s 内变为 allowed" -ForegroundColor Green
+    Write-Host "  PASS: auto-approve active, decision changed to allowed within 2s" -ForegroundColor Green
     $script:pass++
 } elseif ($finalDecision -eq "pending") {
-    Write-Host "  ⏭ SKIP: auto-approve 未开启（请在 VibeHub 中开启后重新运行）" -ForegroundColor DarkYellow
+    Write-Host "  SKIP: auto-approve not enabled (enable in VibeHub and re-run)" -ForegroundColor DarkYellow
     $script:skip++
 } else {
-    Write-Host "  ❌ FAIL: unexpected decision: $finalDecision" -ForegroundColor Red
+    Write-Host "  FAIL: unexpected decision: $finalDecision" -ForegroundColor Red
     $script:fail++
 }
 
-# --- 清理 ---
-Write-Host "`n[清理] 发送 idle 事件重置状态..." -ForegroundColor DarkGray
+# --- Cleanup ---
+Write-Host "`n[Cleanup] Sending idle event to reset state..." -ForegroundColor DarkGray
 $null = Send-Event @{ agent_id="claude"; agent_name="Claude"; event_type="idle" }
 
-# --- 结果 ---
+# --- Results ---
 Write-Host ""
 $total = $pass + $fail + $skip
-Write-Host "=== 结果：$pass PASS / $fail FAIL / $skip SKIP (共 $total 项) ===" -ForegroundColor $(if ($fail -eq 0) { "Green" } else { "Red" })
+$color = if ($fail -eq 0) { "Green" } else { "Red" }
+Write-Host "=== Results: $pass PASS / $fail FAIL / $skip SKIP (total $total) ===" -ForegroundColor $color
 
 if ($fail -gt 0) { exit 1 }
 exit 0
