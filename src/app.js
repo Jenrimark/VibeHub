@@ -106,6 +106,43 @@ function appendLog(state) {
   els.logBody.scrollTop = els.logBody.scrollHeight;
 }
 
+/// 追加诊断日志条目（审批决定、自动批准、错误、状态变化）。
+function appendDecisionLog(type, message) {
+  const typeConfig = {
+    decision: { icon: "✅", label: "DECISION", cls: "done" },
+    auto:     { icon: "⚡", label: "AUTO",     cls: "running" },
+    error:    { icon: "❌", label: "ERROR",    cls: "error" },
+    state:    { icon: "🔄", label: "STATE",    cls: "info" },
+  };
+  const cfg = typeConfig[type] || typeConfig.state;
+  const entry = {
+    time: fmtLogTime(),
+    hook: `${cfg.icon} ${cfg.label}`,
+    status: cfg.cls,
+    detail: message,
+  };
+  logEntries.push(entry);
+  if (logEntries.length > MAX_LOG_LINES) logEntries.shift();
+
+  // 控制台也记录一份
+  console.log(`[VibeHub] ${cfg.icon} ${cfg.label}: ${message}`);
+
+  if (!logVisible) return;
+
+  const line = document.createElement("div");
+  line.className = "log-line";
+  line.innerHTML =
+    `<span class="log-time">${entry.time}</span>` +
+    `<span class="log-event ${entry.status}">${entry.hook}</span>` +
+    `<span class="log-detail">${escapeHtml(entry.detail)}</span>`;
+  els.logBody.appendChild(line);
+
+  while (els.logBody.children.length > MAX_LOG_LINES) {
+    els.logBody.removeChild(els.logBody.firstChild);
+  }
+  els.logBody.scrollTop = els.logBody.scrollHeight;
+}
+
 function renderLogEntries() {
   els.logBody.innerHTML = "";
   for (const entry of logEntries) {
@@ -250,6 +287,35 @@ function renderButtons(suggestions) {
   els.actions.appendChild(label);
 }
 
+/// 在按钮区域显示审批确认消息，持续指定时间后淡出。
+/// type: "approved" | "denied" | "auto"
+function showDecisionFeedback(type, duration) {
+  const labels = {
+    approved: "✓ 已批准",
+    denied: "✗ 已拒绝",
+    auto: "⚡ 自动批准",
+  };
+  const feedback = document.createElement("div");
+  feedback.className = `decision-feedback ${type}`;
+  feedback.textContent = labels[type] || type;
+  els.actions.innerHTML = "";
+  els.actions.appendChild(feedback);
+
+  // 强制 actions 区可见（此时 mainView 可能仍是 needs_input）
+  els.actions.style.display = "flex";
+
+  setTimeout(() => {
+    feedback.classList.add("fade-out");
+    setTimeout(() => {
+      // 淡出完成后清空，render() 会自然接管
+      if (els.actions.contains(feedback)) {
+        els.actions.innerHTML = "";
+        els.actions.style.display = "";
+      }
+    }, 300);
+  }, duration);
+}
+
 /// 提交审批决定。
 async function handleDecision(decision, clickedBtn) {
   // 禁用所有按钮，标记点击的按钮
@@ -263,15 +329,19 @@ async function handleDecision(decision, clickedBtn) {
     }
   });
 
-  if (current.decisionId) {
+  const decId = current.decisionId;
+  if (decId) {
     try {
       await window.__TAURI__.core.invoke("submit_decision", {
-        decisionId: current.decisionId,
+        decisionId: decId,
         decision,
       });
+      // 成功：显示确认反馈
+      showDecisionFeedback(decision === "allowed" ? "approved" : "denied", 1500);
+      appendDecisionLog("decision", `${decision === "allowed" ? "Allowed" : "Denied"} ${decId.slice(0, 8)}`);
     } catch (e) {
       console.error("[VibeHub] submit_decision failed:", e);
-      appendLog({ hook_event: "DecisionError", status: "error", message: String(e) });
+      appendDecisionLog("error", `submit_decision failed: ${e}`);
       // 恢复按钮
       allBtns.forEach((b) => {
         b.classList.remove("acked", "denied");
@@ -282,6 +352,8 @@ async function handleDecision(decision, clickedBtn) {
 }
 
 function render(state) {
+  const previousStatus = current.status;
+
   // 保留 decisionId：后端 preservesActionableState 在审批期间会持续 emit
   // 同一个 decision_id，但普通事件（PostToolUse 等）的 payload 不含 decision_id。
   // 只在 payload 明确携带新 decision_id 时才更新，避免审批期间被覆盖为 null。
@@ -293,6 +365,11 @@ function render(state) {
   }
   current.status = state.status;
   current.startedAt = state.started_at;
+
+  // 诊断日志：记录状态变化
+  if (state.status !== previousStatus) {
+    appendDecisionLog("state", `${previousStatus} → ${state.status}`);
+  }
 
   els.pill.dataset.status = state.status;
   els.mainView.dataset.status = state.status;
@@ -397,10 +474,17 @@ function bindTauri() {
 
       // 自动批准：needs_input + 有 decision_id + autoApprove 开启
       if (payload.status === "needs_input" && payload.decision_id && autoApprove) {
+        const autoDecId = payload.decision_id;
         window.__TAURI__.core.invoke("submit_decision", {
-          decisionId: payload.decision_id,
+          decisionId: autoDecId,
           decision: "allowed",
-        }).catch((e) => console.error("[VibeHub] auto-approve failed:", e));
+        }).then(() => {
+          showDecisionFeedback("auto", 800);
+          appendDecisionLog("auto", `Auto-approved ${autoDecId.slice(0, 8)}`);
+        }).catch((e) => {
+          console.error("[VibeHub] auto-approve failed:", e);
+          appendDecisionLog("error", `auto-approve failed: ${e}`);
+        });
       }
 
       render(payload);
@@ -508,6 +592,8 @@ function handleMenuAction(action) {
 
   if (action === "settings") {
     openSettings();
+  } else if (action === "log") {
+    toggleLog();
   }
 }
 
