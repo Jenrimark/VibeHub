@@ -118,6 +118,8 @@ fn open_settings(app: tauri::AppHandle) -> Result<(), String> {
         .min_inner_size(520.0, 380.0)
         .decorations(true)
         .resizable(true)
+        .maximizable(true)
+        .closable(true)
         .center()
         .build()
         .map_err(|e| e.to_string())?;

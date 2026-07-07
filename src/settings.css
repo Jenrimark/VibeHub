@@ -1,38 +1,22 @@
-/* VibeHub Settings Window — Windows Settings 风格 */
+/* VibeHub Settings Window — 深色主题，匹配胶囊配色 */
 
 :root {
-  --bg: #f3f3f3;
-  --bg-card: #ffffff;
-  --fg: #1a1a1a;
-  --fg-secondary: #616161;
-  --fg-disabled: #a0a0a0;
-  --accent: #0078d4;
-  --accent-hover: #106ebe;
-  --border: #e5e5e5;
-  --sidebar-bg: #f9f9f9;
-  --sidebar-hover: #e9e9e9;
-  --sidebar-active: #ffffff;
-  --toggle-off: #767676;
-  --toggle-on: #0078d4;
-  --success: #0f7b0f;
-  --warning: #9d5d00;
-  --error: #c42b1c;
-}
-
-[data-theme="dark"] {
-  --bg: #202020;
-  --bg-card: #2d2d2d;
-  --fg: #f0f0f0;
-  --fg-secondary: #a0a0a0;
-  --fg-disabled: #606060;
-  --accent: #60cdff;
-  --accent-hover: #0078d4;
-  --border: #404040;
-  --sidebar-bg: #262626;
-  --sidebar-hover: #383838;
-  --sidebar-active: #2d2d2d;
-  --toggle-off: #606060;
-  --toggle-on: #60cdff;
+  --bg: #1a1a1e;
+  --bg-card: #242428;
+  --fg: #f2f2f5;
+  --fg-secondary: #9a9aa6;
+  --fg-disabled: #606068;
+  --accent: #3b82f6;
+  --accent-hover: #2563eb;
+  --border: #333338;
+  --sidebar-bg: #1e1e22;
+  --sidebar-hover: #2a2a2e;
+  --sidebar-active: #242428;
+  --toggle-off: #505058;
+  --toggle-on: #3b82f6;
+  --success: #34c759;
+  --warning: #f5a623;
+  --error: #ff453a;
 }
 
 * {
@@ -71,7 +55,7 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 20px 16px 12px;
+  padding: 20px 16px 16px;
 }
 
 .sidebar-logo {
@@ -100,22 +84,24 @@ body {
   padding: 9px 12px;
   border: none;
   background: transparent;
-  color: var(--fg);
+  color: var(--fg-secondary);
   font-size: 13px;
   font-family: inherit;
   cursor: pointer;
   border-radius: 6px;
-  transition: background 0.12s;
+  transition: background 0.12s, color 0.12s;
   text-align: left;
   white-space: nowrap;
 }
 
 .nav-item:hover {
   background: var(--sidebar-hover);
+  color: var(--fg);
 }
 
 .nav-item.active {
   background: var(--sidebar-active);
+  color: var(--fg);
   font-weight: 600;
 }
 
@@ -147,7 +133,7 @@ body {
 }
 
 .page-title {
-  font-size: 24px;
+  font-size: 22px;
   font-weight: 600;
   margin-bottom: 20px;
   color: var(--fg);
@@ -288,17 +274,17 @@ body {
 }
 
 .status-badge.ok {
-  background: #dff6dd;
+  background: rgba(52, 199, 89, 0.15);
   color: var(--success);
 }
 
 .status-badge.warn {
-  background: #fff4ce;
+  background: rgba(245, 166, 35, 0.15);
   color: var(--warning);
 }
 
 .status-badge.error {
-  background: #fde7e9;
+  background: rgba(255, 69, 58, 0.15);
   color: var(--error);
 }
 

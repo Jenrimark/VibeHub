@@ -22,7 +22,10 @@ navItems.forEach((item) => {
 // ============== 初始化设置值 ==============
 function initSettings() {
   const tauri = window.__TAURI__;
-  if (!tauri?.core?.invoke) return;
+  if (!tauri?.core?.invoke) {
+    console.warn("[Settings] Tauri API not available");
+    return;
+  }
 
   // Hook 状态
   tauri.core.invoke("get_hook_status").then((status) => {
@@ -40,23 +43,21 @@ function initSettings() {
     if (hookPath && status.hook_path) {
       hookPath.value = status.hook_path;
     }
-  }).catch(() => {});
+  }).catch((e) => console.warn("[Settings] get_hook_status:", e));
 
   // 窗口置顶
   tauri.core.invoke("get_always_on_top").then((v) => {
     const el = document.getElementById("settAlwaysOnTop");
     if (el) el.checked = v;
-  }).catch(() => {});
+  }).catch((e) => console.warn("[Settings] get_always_on_top:", e));
 
-  // 自动批准（从主窗口 localStorage 同步）
-  // 注意：Tauri 多窗口共享同一个 WebView 上下文，localStorage 是共享的
+  // 自动批准（localStorage 共享）
   const autoApprove = localStorage.getItem("vibehub_auto_approve") === "true";
   const el = document.getElementById("settAutoApprove");
   if (el) el.checked = autoApprove;
 }
 
 // ============== 事件绑定 ==============
-// 窗口置顶
 document.getElementById("settAlwaysOnTop")?.addEventListener("change", async (e) => {
   const tauri = window.__TAURI__;
   if (tauri?.core?.invoke) {
@@ -68,18 +69,20 @@ document.getElementById("settAlwaysOnTop")?.addEventListener("change", async (e)
   }
 });
 
-// 自动批准
 document.getElementById("settAutoApprove")?.addEventListener("change", (e) => {
   localStorage.setItem("vibehub_auto_approve", e.target.checked ? "true" : "false");
 });
 
-// ============== 暗色模式检测 ==============
-function applyTheme() {
-  const isDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-  document.documentElement.setAttribute("data-theme", isDark ? "dark" : "light");
-}
-applyTheme();
-window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyTheme);
-
 // ============== 启动 ==============
-initSettings();
+// 等待 Tauri API 就绪
+if (window.__TAURI__) {
+  initSettings();
+} else {
+  let tries = 0;
+  const t = setInterval(() => {
+    if (window.__TAURI__ || ++tries > 50) {
+      clearInterval(t);
+      if (window.__TAURI__) initSettings();
+    }
+  }, 100);
+}
