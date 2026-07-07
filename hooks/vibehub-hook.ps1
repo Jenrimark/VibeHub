@@ -31,6 +31,7 @@ $agentId = ""
 $agentType = ""
 $isInterrupt = $false
 $lastAssistantMsg = ""
+$permissionSuggestions = $null
 
 try {
     if ($raw) {
@@ -47,6 +48,7 @@ try {
         if ($data.is_interrupt)  { $isInterrupt  = [bool]$data.is_interrupt }
         # 提取最后一条 assistant 消息（Stop 事件时有用）
         if ($data.last_assistant_message) { $lastAssistantMsg = "$($data.last_assistant_message)" }
+        if ($data.permission_suggestions) { $permissionSuggestions = $data.permission_suggestions }
     }
 } catch {}
 
@@ -179,6 +181,7 @@ if ($lastAssistantMsg -and $hookEvent -ne "Stop") {
 }
 if ($agentType)       { $payload["agent_type"]        = $agentType }
 if ($isInterrupt)     { $payload["is_interrupt"]      = $true }
+if ($permissionSuggestions) { $payload["permission_suggestions"] = $permissionSuggestions }
 
 try {
     $json = $payload | ConvertTo-Json -Compress
@@ -191,26 +194,52 @@ try {
     exit 0
 }
 
-# 审批场景：轮询 GET /decision/{id}，最多等 120 秒。
+# 审批场景：轮询 GET /decision/{id}，最多等 3600 秒。
 if ($needsApproval -and $decisionId) {
     $pollUrl = "$baseUrl/decision/$decisionId"
-    $deadline = (Get-Date).AddSeconds(120)
+    $deadline = (Get-Date).AddSeconds(3600)
+
+    # PreToolUse 和 PermissionRequest 都需要写 stdout JSON（hookSpecificOutput），
+    # 仅靠 exit code 无法跳过 Claude Code 原生的权限确认弹窗。
+    $isPermissionRequest = ($hookEvent -eq "PermissionRequest")
+
+    # 输出 hook 决策 JSON。当前 Claude Code 要求用 hookSpecificOutput 包装，
+    # 顶层 {"decision":...} 是过时格式，Claude Code 解析不到会静默走原生弹窗。
+    function Write-Decision([string]$behavior) {
+        if ($isPermissionRequest) {
+            $out = "{`"hookSpecificOutput`":{`"hookEventName`":`"PermissionRequest`",`"decision`":{`"behavior`":`"$behavior`"}}}"
+        } else {
+            $decision = if ($behavior -eq "allow") { "allow" } else { "deny" }
+            $reason = if ($behavior -eq "allow") { "Approved via VibeHub" } else { "Denied via VibeHub" }
+            $out = "{`"hookSpecificOutput`":{`"hookEventName`":`"PreToolUse`",`"permissionDecision`":`"$decision`",`"permissionDecisionReason`":`"$reason`"}}"
+        }
+        [Console]::Out.Write($out)
+        [Console]::Out.Flush()
+    }
 
     while ((Get-Date) -lt $deadline) {
         Start-Sleep -Milliseconds 500
         try {
             $resp = Invoke-RestMethod -Uri $pollUrl -Method Get -TimeoutSec 2
             $d = $resp.decision
-            if ($d -eq "allowed") { exit 0 }
-            if ($d -eq "denied")  { exit 2 }
+            if ($d -eq "allowed") {
+                Write-Decision "allow"
+                exit 0
+            }
+            if ($d -eq "denied") {
+                Write-Decision "deny"
+                exit 0
+            }
             # pending -> 继续等待
         } catch {
             # 网络错误默认允许，不阻塞 Claude
+            Write-Decision "allow"
             exit 0
         }
     }
 
     # 超时默认允许
+    Write-Decision "allow"
     exit 0
 }
 

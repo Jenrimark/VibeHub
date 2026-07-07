@@ -44,14 +44,28 @@ fn settings_path() -> Option<PathBuf> {
     Some(PathBuf::from(home).join(".claude").join("settings.json"))
 }
 
-/// 检查 settings.json 中是否已配置 VibeHub hook。
+/// 检查 settings.json 中是否已配置带正确超时的 VibeHub hook。
+/// PermissionRequest 必须有 timeout:86400，否则视为需要重新配置。
 fn has_vibehub_hook(settings: &JsonValue) -> bool {
     let hooks = match settings.get("hooks") {
         Some(h) => h,
         None => return false,
     };
-    let json_str = hooks.to_string();
-    json_str.contains("vibehub-hook")
+    // 检查 PermissionRequest 是否有 vibehub-hook 且带 86400 超时。
+    if let Some(entries) = hooks.get("PermissionRequest").and_then(|v| v.as_array()) {
+        for entry in entries {
+            if let Some(inner_hooks) = entry.get("hooks").and_then(|v| v.as_array()) {
+                for h in inner_hooks {
+                    let cmd = h.get("command").and_then(|v| v.as_str()).unwrap_or("");
+                    let timeout = h.get("timeout").and_then(|v| v.as_u64()).unwrap_or(0);
+                    if cmd.contains("vibehub-hook") && timeout == 86400 {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    false
 }
 
 /// 生成 hook command 字符串。
@@ -62,12 +76,24 @@ fn hook_command(hook_path: &str) -> String {
     )
 }
 
-/// 为所有 Claude Code 生命周期事件创建 hook 条目。
+/// 为普通事件（非 PermissionRequest）创建 hook 条目。
 fn make_hook_entry(command: &str) -> JsonValue {
     serde_json::json!([{
         "hooks": [{
             "type": "command",
             "command": command
+        }]
+    }])
+}
+
+/// 为 PermissionRequest 创建专用条目：超时 86400 秒（24 小时），
+/// 让 hook 进程有足够时间等待用户决策。
+fn make_permission_hook_entry(command: &str) -> JsonValue {
+    serde_json::json!([{
+        "hooks": [{
+            "type": "command",
+            "command": command,
+            "timeout": 86400
         }]
     }])
 }
@@ -98,13 +124,18 @@ pub fn ensure_hooks_configured() -> (bool, String) {
     }
 
     // 读取现有 settings.json（不存在则为空对象）。
-    let mut settings: JsonValue = match std::fs::read_to_string(&settings_path) {
+    let mut settings: JsonValue;
+    let mut original_raw = String::new();
+    match std::fs::read_to_string(&settings_path) {
         Ok(content) => {
             // 处理 UTF-8 BOM（Windows 记事本可能添加）。
             let clean = content.trim_start_matches('\u{FEFF}');
-            serde_json::from_str(clean).unwrap_or(JsonValue::Object(serde_json::Map::new()))
+            original_raw = clean.to_string();
+            settings = serde_json::from_str(clean).unwrap_or(JsonValue::Object(serde_json::Map::new()));
         }
-        Err(_) => JsonValue::Object(serde_json::Map::new()),
+        Err(_) => {
+            settings = JsonValue::Object(serde_json::Map::new());
+        }
     };
 
     // 已配置则跳过。
@@ -123,6 +154,7 @@ pub fn ensure_hooks_configured() -> (bool, String) {
     // 合并 hooks。
     let cmd = hook_command(&hook_path_str);
     let hook_entry = make_hook_entry(&cmd);
+    let permission_hook_entry = make_permission_hook_entry(&cmd);
 
     let events = [
         "SessionStart",
@@ -130,7 +162,6 @@ pub fn ensure_hooks_configured() -> (bool, String) {
         "PreToolUse",
         "PostToolUse",
         "PostToolUseFailure",
-        "PermissionRequest",
         "PermissionDenied",
         "Notification",
         "Stop",
@@ -147,24 +178,31 @@ pub fn ensure_hooks_configured() -> (bool, String) {
     for event in &events {
         settings["hooks"][event] = hook_entry.clone();
     }
+    // PermissionRequest 必须单独配置 86400 超时，否则 Claude Code 会用默认超时 kill hook。
+    settings["hooks"]["PermissionRequest"] = permission_hook_entry;
 
-    // 写回。
-    match serde_json::to_string_pretty(&settings) {
-        Ok(json) => match std::fs::write(&settings_path, json) {
-            Ok(_) => {
-                println!(
-                    "[VibeHub] 已自动配置 hooks -> {}",
-                    settings_path.display()
-                );
-                (true, hook_path_str)
-            }
-            Err(e) => {
-                eprintln!("[VibeHub] 写入 settings.json 失败: {e}");
-                (false, hook_path_str)
-            }
-        },
+    // 写回：仅在内容有变化时写入，避免破坏用户原始格式。
+    let new_json = match serde_json::to_string_pretty(&settings) {
+        Ok(j) => j,
         Err(e) => {
             eprintln!("[VibeHub] JSON 序列化失败: {e}");
+            return (false, hook_path_str);
+        }
+    };
+    if new_json == original_raw {
+        println!("[VibeHub] settings.json 内容未变，跳过写入");
+        return (true, hook_path_str);
+    }
+    match std::fs::write(&settings_path, &new_json) {
+        Ok(_) => {
+            println!(
+                "[VibeHub] 已自动配置 hooks -> {}",
+                settings_path.display()
+            );
+            (true, hook_path_str)
+        }
+        Err(e) => {
+            eprintln!("[VibeHub] 写入 settings.json 失败: {e}");
             (false, hook_path_str)
         }
     }

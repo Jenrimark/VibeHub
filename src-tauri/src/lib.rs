@@ -3,7 +3,7 @@ mod hooks;
 mod server;
 mod state;
 
-use state::{AppState, Decision, DiscoveredSession};
+use state::{AgentStatus, AppState, Decision, DiscoveredSession};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{
@@ -16,20 +16,38 @@ type SharedState = Arc<Mutex<AppState>>;
 
 /// 前端按钮调用：提交 Allow / Deny 决定。
 /// decision: "allowed" | "denied"
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 fn submit_decision(
     decision_id: String,
     decision: String,
     app_state: State<'_, SharedState>,
+    app: tauri::AppHandle,
 ) -> Result<(), String> {
     let d = match decision.as_str() {
         "allowed" => Decision::Allowed,
         "denied" => Decision::Denied,
         _ => return Err(format!("unknown decision: {decision}")),
     };
-    let mut guard = app_state.lock().unwrap_or_else(|e| e.into_inner());
-    if !guard.submit_decision(&decision_id, d) {
-        return Err(format!("decision_id not found: {decision_id}"));
+    let (updated, _owner_id) = {
+        let mut guard = app_state.lock().unwrap_or_else(|e| e.into_inner());
+        let owner_id = guard.submit_decision(&decision_id, d);
+        if owner_id.is_none() {
+            return Err(format!("decision_id not found: {decision_id}"));
+        }
+        // 将持有该 decision_id 的 agent 从 needs_input 切回 running。
+        if let Some(ref aid) = owner_id {
+            if let Some(agent) = guard.agents.get_mut(aid) {
+                agent.status = AgentStatus::Running;
+            }
+        }
+        // 克隆用于 emit 的 agent 状态。
+        let cloned = owner_id.as_ref()
+            .and_then(|aid| guard.agents.get(aid).cloned())
+            .or_else(|| guard.agents.values().next().cloned());
+        (cloned, owner_id)
+    };
+    if let Some(state) = updated {
+        let _ = app.emit("agent-update", &state);
     }
     Ok(())
 }
@@ -49,7 +67,7 @@ fn set_window_size(app: tauri::AppHandle, width: f64, height: f64) -> Result<(),
 }
 
 /// 设置窗口置顶。
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 fn set_always_on_top(app: tauri::AppHandle, always_on_top: bool) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("main") {
         window
@@ -269,6 +287,47 @@ fn is_leap(y: i32) -> bool {
     (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
 }
 
+/// 检测 claude.exe 是否在运行。
+/// 用 `tasklist` 过滤进程名，避免引入 winapi 依赖。
+fn is_claude_running() -> bool {
+    std::process::Command::new("tasklist")
+        .args(["/FI", "IMAGENAME eq claude.exe", "/NH", "/FO", "CSV"])
+        .output()
+        .map(|out| {
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            stdout.contains("claude.exe")
+        })
+        .unwrap_or(true) // tasklist 失败时保守地认为还在运行
+}
+
+/// 后台进程存活监控：每 30 秒检测一次 claude.exe。
+/// 如果检测到进程消失，将所有非 Idle 会话清零并通知前端。
+fn start_process_monitor(handle: tauri::AppHandle, app_state: SharedState) {
+    std::thread::spawn(move || {
+        let mut was_running = true;
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(30));
+            let running = is_claude_running();
+            if was_running && !running {
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .ok()
+                    .map(|d| d.as_secs() as i64)
+                    .unwrap_or(0);
+                let updated = {
+                    let mut guard = app_state.lock().unwrap_or_else(|e| e.into_inner());
+                    guard.clear_stale_agents(now)
+                };
+                for state in updated {
+                    let _ = handle.emit("agent-update", &state);
+                }
+                println!("[VibeHub] claude.exe 已退出，会话状态已清零");
+            }
+            was_running = running;
+        }
+    });
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app_state: SharedState = Arc::new(Mutex::new(AppState::default()));
@@ -289,11 +348,14 @@ pub fn run() {
             if let Some(window) = app.get_webview_window("main") {
                 if let Some(monitor) = window.primary_monitor().ok().flatten() {
                     let screen_w = monitor.size().width as i32;
-                    let win_w = 420_i32;
+                    let win_w = 340_i32;
                     let x = (screen_w - win_w) / 2;
                     let _ = window.set_position(tauri::PhysicalPosition::new(x, 8));
                 }
             }
+
+            // 启动进程存活监控。
+            start_process_monitor(handle.clone(), app_state.clone());
 
             // 启动本地 HTTP 服务接收 hook 事件。
             if let Err(e) = server::start(handle.clone(), app_state.clone()) {

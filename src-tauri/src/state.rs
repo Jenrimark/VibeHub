@@ -54,6 +54,9 @@ pub struct AgentState {
     /// 原始 hook 事件名（如 "PreToolUse"、"SubagentStart"）。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hook_event: Option<String>,
+    /// PermissionRequest 时 Claude 提供的权限建议选项。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub permission_suggestions: Option<Vec<serde_json::Value>>,
 }
 
 impl AgentState {
@@ -71,6 +74,7 @@ impl AgentState {
             last_message: None,
             error: None,
             hook_event: None,
+            permission_suggestions: None,
         }
     }
 
@@ -118,8 +122,13 @@ impl AgentState {
             && self.decision_id.is_some()
             && !is_new_needs_input
         {
-            // 只更新 tool_preview 等辅助信息，保持 needs_input 不变。
-            self.update_tool_context(ev);
+            // PostToolUse 在审批等待期也应清除 current_tool，避免 UI 显示过时工具名。
+            if hook_event.as_deref() == Some("PostToolUse") {
+                self.current_tool = None;
+                self.tool_preview = None;
+            } else {
+                self.update_tool_context(ev);
+            }
             return;
         }
 
@@ -163,20 +172,21 @@ impl AgentState {
                     .unwrap_or_else(|| "Tool failed".to_string());
             }
             // 权限请求：需要用户输入。
+            // 先清除之前的工具上下文，避免上一个工具的残留数据污染审批 UI。
             Some("PermissionRequest") => {
                 self.status = AgentStatus::NeedsInput;
+                self.current_tool = None;
+                self.tool_preview = None;
+                self.error = None;
                 self.update_tool_context(ev);
+                self.permission_suggestions = ev.permission_suggestions.clone();
             }
             // 权限被拒绝：回到 running。
             Some("PermissionDenied") => {
                 self.status = AgentStatus::Running;
             }
-            // 通知：有消息体时需要用户注意。
+            // 通知：保持 event_type 映射的状态，记录工具上下文。
             Some("Notification") => {
-                // 保持当前状态，除非消息非空（由 hook 映射为 needs_input）。
-                if status == AgentStatus::NeedsInput {
-                    self.status = AgentStatus::NeedsInput;
-                }
                 self.update_tool_context(ev);
             }
             // Subagent 开始：更新 task 信息。
@@ -217,10 +227,11 @@ impl AgentState {
                 self.tool_preview = None;
                 self.last_message = None;
                 self.error = None;
+                self.hook_event = None;
+                self.permission_suggestions = None;
             }
             // 其他 / 未知：使用 event_type 映射的状态。
             _ => {
-                self.status = status;
                 match status {
                     AgentStatus::Idle => {
                         self.started_at = None;
@@ -312,6 +323,9 @@ pub struct IncomingEvent {
     #[serde(default)]
     #[allow(dead_code)]
     pub is_interrupt: Option<bool>,
+    /// PermissionRequest 时 Claude 提供的权限建议选项。
+    #[serde(default)]
+    pub permission_suggestions: Option<Vec<serde_json::Value>>,
 }
 
 impl IncomingEvent {
@@ -330,8 +344,6 @@ pub struct AppState {
     pub agents: HashMap<String, AgentState>,
     /// 待审批决定：decision_id -> Decision。
     pub decisions: HashMap<String, Decision>,
-    /// 当前活跃的 decision_id（供前端展示）。
-    pub active_decision_id: Option<String>,
 }
 
 impl AppState {
@@ -345,41 +357,35 @@ impl AppState {
             .or_insert_with(|| AgentState::new(&id, &default_name));
         agent.apply(ev, now);
 
-        // 若附带 decision_id，登记为 Pending 并记为当前活跃。
+        // 若附带 decision_id，登记为 Pending。
         // 仅在新 decision_id 时插入，不覆盖已决定的结果。
         if let Some(did) = &ev.decision_id {
             if !did.is_empty() {
                 self.decisions.entry(did.clone()).or_insert(Decision::Pending);
-                self.active_decision_id = Some(did.clone());
                 agent.decision_id = Some(did.clone());
             }
-        } else if ev.event_type != "needs_input" {
-            // 非审批事件时清空活跃 decision_id。
-            self.active_decision_id = None;
         }
 
         agent.clone()
     }
 
-    /// 用户提交决定，返回是否找到该 decision_id。
-    /// 决策完成后同时清除 active_decision_id 和对应 agent 的 decision_id。
-    pub fn submit_decision(&mut self, decision_id: &str, decision: Decision) -> bool {
+    /// 用户提交决定，返回持有该 decision_id 的 agent_id（如有），供调用方更新状态。
+    /// 决策完成后清除对应 agent 的 decision_id。
+    pub fn submit_decision(&mut self, decision_id: &str, decision: Decision) -> Option<String> {
         if let Some(d) = self.decisions.get_mut(decision_id) {
             *d = decision;
-            // 清除活跃 decision_id。
-            if self.active_decision_id.as_deref() == Some(decision_id) {
-                self.active_decision_id = None;
-            }
-            // 清除持有该 decision_id 的 agent 状态。
-            for agent in self.agents.values_mut() {
+            // 找到持有该 decision_id 的 agent，记录其 ID，然后清除 decision_id。
+            let mut owner_id: Option<String> = None;
+            for (id, agent) in self.agents.iter_mut() {
                 if agent.decision_id.as_deref() == Some(decision_id) {
+                    owner_id = Some(id.clone());
                     agent.decision_id = None;
                     break;
                 }
             }
-            true
+            owner_id
         } else {
-            false
+            None
         }
     }
 
@@ -389,6 +395,40 @@ impl AppState {
             .get(decision_id)
             .copied()
             .unwrap_or(Decision::Pending)
+    }
+
+    /// 将所有非 Idle 会话强制重置为 Idle（进程消失时调用）。
+    /// 返回已更新的 AgentState 列表供调用方 emit。
+    pub fn clear_stale_agents(&mut self, now: i64) -> Vec<AgentState> {
+        let ids: Vec<String> = self
+            .agents
+            .iter()
+            .filter(|(_, a)| a.status != AgentStatus::Idle)
+            .map(|(id, _)| id.clone())
+            .collect();
+
+        ids.into_iter()
+            .map(|id| {
+                let ev = IncomingEvent {
+                    event_type: "idle".to_string(),
+                    hook_event_name: Some("SessionEnd".to_string()),
+                    agent_id: Some(id),
+                    agent_name: None,
+                    task: None,
+                    message: None,
+                    decision_id: None,
+                    tool_name: None,
+                    tool_preview: None,
+                    response_preview: None,
+                    error: None,
+                    last_message: None,
+                    agent_type: None,
+                    is_interrupt: None,
+                    permission_suggestions: None,
+                };
+                self.handle(&ev, now)
+            })
+            .collect()
     }
 }
 
@@ -430,6 +470,7 @@ mod tests {
             last_message: None,
             agent_type: None,
             is_interrupt: None,
+            permission_suggestions: None,
         }
     }
 
@@ -506,8 +547,9 @@ mod tests {
         app.handle(&e1, 100);
         assert_eq!(app.decisions.get("abc123"), Some(&Decision::Pending));
 
-        // 用户已批准
-        app.submit_decision("abc123", Decision::Allowed);
+        // 用户已批准，返回持有该 decision 的 agent_id
+        let owner = app.submit_decision("abc123", Decision::Allowed);
+        assert_eq!(owner.as_deref(), Some("claude"));
         assert_eq!(app.decisions.get("abc123"), Some(&Decision::Allowed));
 
         // 重复/迟到事件：不应把已决定的结果覆盖回 Pending
