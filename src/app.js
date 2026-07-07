@@ -21,6 +21,9 @@ const els = {
   timer: document.getElementById("timer"),
   actions: document.getElementById("actions"),
   contextMenu: document.getElementById("contextMenu"),
+  settingsPage: document.getElementById("settingsPage"),
+  settingsClose: document.getElementById("settingsClose"),
+  settAlwaysOnTop: document.getElementById("settAlwaysOnTop"),
   logPanel: document.getElementById("logPanel"),
   logBody: document.getElementById("logBody"),
   logClear: document.getElementById("logClear"),
@@ -610,15 +613,51 @@ document.addEventListener("click", (e) => {
 
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
-    hideContextMenu();
+    if (settingsVisible) closeSettings();
+    else hideContextMenu();
   }
 });
 
-// ============== 设置页面（独立窗口） ==============
+// ============== 设置页面（全页面视图） ==============
 function openSettings() {
+  settingsVisible = true;
+  els.mainView.style.display = "none";
+  els.settingsPage.classList.add("visible");
+
   if (window.__TAURI__?.core?.invoke) {
-    window.__TAURI__.core.invoke("open_settings").catch((e) => {
-      console.error("[VibeHub] open_settings failed:", e);
-    });
+    window.__TAURI__.core.invoke("get_always_on_top").then((v) => {
+      els.settAlwaysOnTop.checked = v;
+    }).catch(() => {});
+  }
+
+  if (window.__TAURI__?.core?.invoke) {
+    window.__TAURI__.core.invoke("set_window_size", { width: 340, height: 260 });
   }
 }
+
+function closeSettings() {
+  settingsVisible = false;
+  els.settingsPage.classList.remove("visible");
+  els.mainView.style.display = "";
+
+  adjustWindowHeight(current.status);
+}
+
+els.settingsClose.addEventListener("click", closeSettings);
+
+const hookPathInput = document.getElementById("settHookPath");
+if (hookPathInput) {
+  hookPathInput.value = "hooks/vibehub-hook.ps1";
+}
+
+els.settAlwaysOnTop.addEventListener("change", async () => {
+  if (window.__TAURI__?.core?.invoke) {
+    try {
+      await window.__TAURI__.core.invoke("set_always_on_top", {
+        alwaysOnTop: els.settAlwaysOnTop.checked,
+      });
+    } catch (e) {
+      console.error("[VibeHub] set_always_on_top failed:", e);
+    }
+  }
+});

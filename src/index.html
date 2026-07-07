@@ -44,6 +44,37 @@
       <button class="ctx-item" data-action="settings" role="menuitem">⚙️ 设置</button>
     </div>
 
+    <!-- 设置页面（全页面视图，取代胶囊） -->
+    <div id="settingsPage" class="settings-page" role="dialog" aria-label="Settings">
+      <div class="settings-header">
+        <span class="settings-title">Settings</span>
+        <button class="settings-close" id="settingsClose" aria-label="Close settings">✕</button>
+      </div>
+      <div class="setting-item">
+        <label>Hook Status</label>
+        <span class="setting-value" id="hookStatus" style="font-size:11px">checking...</span>
+      </div>
+      <div class="setting-item">
+        <label>Port</label>
+        <input type="text" id="settPort" value="51789" readonly />
+      </div>
+      <div class="setting-item">
+        <label>Hook Path</label>
+        <input type="text" id="settHookPath" value="..." readonly class="setting-path" />
+      </div>
+      <div class="setting-item">
+        <label for="settAlwaysOnTop">Always on Top</label>
+        <label class="toggle">
+          <input type="checkbox" id="settAlwaysOnTop" />
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="setting-item">
+        <label>Version</label>
+        <span class="setting-value">0.2.0</span>
+      </div>
+    </div>
+
     <script type="module" src="app.js"></script>
   </body>
 </html>
