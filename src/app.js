@@ -24,7 +24,6 @@ const els = {
   settingsPage: document.getElementById("settingsPage"),
   settingsClose: document.getElementById("settingsClose"),
   settAlwaysOnTop: document.getElementById("settAlwaysOnTop"),
-  logPanel: document.getElementById("logPanel"),
   logBody: document.getElementById("logBody"),
   logClear: document.getElementById("logClear"),
 };
@@ -59,8 +58,7 @@ let current = { status: "idle", startedAt: null, decisionId: null, connected: nu
 // 发布版：前端通过 tauri:// 或 file:// 加载
 const isDev = window.location.hostname === "localhost" || window.location.protocol === "http:";
 
-const MAX_LOG_LINES = 80;
-let logVisible = isDev && localStorage.getItem("vibehub_log_visible") === "true";
+const MAX_LOG_LINES = 200;
 let logEntries = [];
 
 function fmtLogTime() {
@@ -87,8 +85,10 @@ function appendLog(state) {
   logEntries.push(entry);
   if (logEntries.length > MAX_LOG_LINES) logEntries.shift();
 
-  if (!logVisible) return;
+  appendLogLine(entry);
+}
 
+function appendLogLine(entry) {
   const line = document.createElement("div");
   line.className = "log-line";
   line.innerHTML =
@@ -97,12 +97,9 @@ function appendLog(state) {
     `<span class="log-detail">${escapeHtml(entry.detail)}</span>`;
   els.logBody.appendChild(line);
 
-  // 裁剪超出
   while (els.logBody.children.length > MAX_LOG_LINES) {
     els.logBody.removeChild(els.logBody.firstChild);
   }
-
-  // 自动滚动到底部
   els.logBody.scrollTop = els.logBody.scrollHeight;
 }
 
@@ -124,65 +121,19 @@ function appendDecisionLog(type, message) {
   logEntries.push(entry);
   if (logEntries.length > MAX_LOG_LINES) logEntries.shift();
 
-  // 控制台也记录一份
   console.log(`[VibeHub] ${cfg.icon} ${cfg.label}: ${message}`);
-
-  if (!logVisible) return;
-
-  const line = document.createElement("div");
-  line.className = "log-line";
-  line.innerHTML =
-    `<span class="log-time">${entry.time}</span>` +
-    `<span class="log-event ${entry.status}">${entry.hook}</span>` +
-    `<span class="log-detail">${escapeHtml(entry.detail)}</span>`;
-  els.logBody.appendChild(line);
-
-  while (els.logBody.children.length > MAX_LOG_LINES) {
-    els.logBody.removeChild(els.logBody.firstChild);
-  }
-  els.logBody.scrollTop = els.logBody.scrollHeight;
+  appendLogLine(entry);
 }
 
 function renderLogEntries() {
   els.logBody.innerHTML = "";
   for (const entry of logEntries) {
-    const line = document.createElement("div");
-    line.className = "log-line";
-    line.innerHTML =
-      `<span class="log-time">${entry.time}</span>` +
-      `<span class="log-event ${entry.status}">${entry.hook}</span>` +
-      `<span class="log-detail">${escapeHtml(entry.detail)}</span>`;
-    els.logBody.appendChild(line);
+    appendLogLine(entry);
   }
-  els.logBody.scrollTop = els.logBody.scrollHeight;
 }
 
 function escapeHtml(s) {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
-
-function toggleLog() {
-  logVisible = !logVisible;
-  localStorage.setItem("vibehub_log_visible", logVisible ? "true" : "false");
-  if (logVisible) {
-    els.logPanel.classList.remove("hidden");
-    renderLogEntries();
-  } else {
-    els.logPanel.classList.add("hidden");
-  }
-  adjustWindowHeight(current.status);
-}
-
-// 点击胶囊展开/折叠日志（避免与拖拽和右键菜单冲突，仅开发模式）
-let pillDragged = false;
-if (isDev) {
-  els.pill.addEventListener("mousedown", () => { pillDragged = false; });
-  els.pill.addEventListener("mousemove", () => { pillDragged = true; });
-  els.pill.addEventListener("click", (e) => {
-    if (e.button !== 0 || pillDragged) return;
-    if (!els.contextMenu.classList.contains("hidden")) return;
-    toggleLog();
-  });
 }
 
 // 清空日志
@@ -191,12 +142,6 @@ els.logClear.addEventListener("click", (e) => {
   logEntries = [];
   els.logBody.innerHTML = "";
 });
-
-// 恢复上次日志面板状态（仅开发模式）
-if (isDev && logVisible) {
-  els.logPanel.classList.remove("hidden");
-  setTimeout(() => adjustWindowHeight("idle"), 300);
-}
 
 function fmtElapsed(startedAt) {
   if (!startedAt) return "";
@@ -452,8 +397,7 @@ function render(state) {
 
 function adjustWindowHeight(status) {
   if (window.__TAURI__?.core?.invoke) {
-    let h = status === "needs_input" ? 120 : 80;
-    if (logVisible) h += 240; // 日志面板空间
+    const h = status === "needs_input" ? 120 : 80;
     window.__TAURI__.core.invoke("set_window_size", { width: 340, height: h });
   }
 }
@@ -514,8 +458,8 @@ function bindTauri() {
       current.connected = configured;
       const hookStatusEl = document.getElementById("hookStatus");
       if (hookStatusEl) {
-        hookStatusEl.textContent = configured ? "✅ 已连接" : "⚠ 未配置";
-        hookStatusEl.style.color = configured ? "#34c759" : "#f5a623";
+        hookStatusEl.textContent = configured ? "已连接" : "未配置";
+        hookStatusEl.className = "status-badge" + (configured ? " ok" : "");
       }
       if (current.status === "idle" && !configured) {
         els.pill.dataset.connected = "false";
@@ -589,11 +533,8 @@ function hideContextMenu() {
 
 function handleMenuAction(action) {
   hideContextMenu();
-
   if (action === "settings") {
     openSettings();
-  } else if (action === "log") {
-    toggleLog();
   }
 }
 
@@ -624,14 +565,32 @@ function openSettings() {
   els.mainView.style.display = "none";
   els.settingsPage.classList.add("visible");
 
+  // 重置导航到常规页
+  document.querySelectorAll(".snav-item").forEach((n) => n.classList.remove("active"));
+  document.querySelector('.snav-item[data-page="general"]')?.classList.add("active");
+  document.querySelectorAll(".spage").forEach((p) => p.classList.remove("active"));
+  document.getElementById("spage-general")?.classList.add("active");
+
+  // 同步设置值
+  const settAutoApprove = document.getElementById("settAutoApprove");
+  if (settAutoApprove) settAutoApprove.checked = autoApprove;
+
   if (window.__TAURI__?.core?.invoke) {
     window.__TAURI__.core.invoke("get_always_on_top").then((v) => {
       els.settAlwaysOnTop.checked = v;
     }).catch(() => {});
-  }
 
-  if (window.__TAURI__?.core?.invoke) {
-    window.__TAURI__.core.invoke("set_window_size", { width: 340, height: 260 });
+    window.__TAURI__.core.invoke("get_hook_status").then((status) => {
+      const el = document.getElementById("hookStatus");
+      if (el) {
+        el.textContent = status.configured ? "已连接" : "未配置";
+        el.className = "status-badge" + (status.configured ? " ok" : "");
+      }
+      const hookPath = document.getElementById("settHookPath");
+      if (hookPath && status.hook_path) hookPath.value = status.hook_path;
+    }).catch(() => {});
+
+    window.__TAURI__.core.invoke("set_window_size", { width: 800, height: 600 });
   }
 }
 
@@ -645,11 +604,6 @@ function closeSettings() {
 
 els.settingsClose.addEventListener("click", closeSettings);
 
-const hookPathInput = document.getElementById("settHookPath");
-if (hookPathInput) {
-  hookPathInput.value = "hooks/vibehub-hook.ps1";
-}
-
 els.settAlwaysOnTop.addEventListener("change", async () => {
   if (window.__TAURI__?.core?.invoke) {
     try {
@@ -661,3 +615,24 @@ els.settAlwaysOnTop.addEventListener("change", async () => {
     }
   }
 });
+
+// 设置页面导航切换
+document.querySelectorAll(".snav-item").forEach((item) => {
+  item.addEventListener("click", () => {
+    const target = item.dataset.page;
+    document.querySelectorAll(".snav-item").forEach((n) => n.classList.remove("active"));
+    item.classList.add("active");
+    document.querySelectorAll(".spage").forEach((p) => p.classList.remove("active"));
+    const page = document.getElementById(`spage-${target}`);
+    if (page) page.classList.add("active");
+  });
+});
+
+// 设置页面自动批准开关
+const settAutoApprove = document.getElementById("settAutoApprove");
+if (settAutoApprove) {
+  settAutoApprove.checked = autoApprove;
+  settAutoApprove.addEventListener("change", () => {
+    autoApprove = settAutoApprove.checked;
+  });
+}

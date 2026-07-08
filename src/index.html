@@ -29,50 +29,132 @@
       <div class="actions" id="actions"></div>
     </div>
 
-    <!-- 实时日志面板：点击胶囊展开/折叠 -->
-    <div id="logPanel" class="log-panel hidden" role="log" aria-live="polite">
-      <div class="log-header">
-        <span class="log-title">Event Log</span>
-        <button class="log-clear" id="logClear" title="Clear log">✕</button>
-      </div>
-      <div class="log-body" id="logBody"></div>
-    </div>
-
     <!-- 右键上下文菜单 -->
     <div id="contextMenu" class="context-menu hidden" role="menu">
-      <button class="ctx-item" data-action="log" role="menuitem">📋 事件日志</button>
       <button class="ctx-item" data-action="settings" role="menuitem">⚙️ 设置</button>
     </div>
 
-    <!-- 设置页面（全页面视图，取代胶囊） -->
+    <!-- 设置页面（全页面视图，分栏布局） -->
     <div id="settingsPage" class="settings-page" role="dialog" aria-label="Settings">
-      <div class="settings-header">
-        <span class="settings-title">Settings</span>
-        <button class="settings-close" id="settingsClose" aria-label="Close settings">✕</button>
-      </div>
-      <div class="setting-item">
-        <label>Hook Status</label>
-        <span class="setting-value" id="hookStatus" style="font-size:11px">checking...</span>
-      </div>
-      <div class="setting-item">
-        <label>Port</label>
-        <input type="text" id="settPort" value="51789" readonly />
-      </div>
-      <div class="setting-item">
-        <label>Hook Path</label>
-        <input type="text" id="settHookPath" value="..." readonly class="setting-path" />
-      </div>
-      <div class="setting-item">
-        <label for="settAlwaysOnTop">Always on Top</label>
-        <label class="toggle">
-          <input type="checkbox" id="settAlwaysOnTop" />
-          <span class="toggle-slider"></span>
-        </label>
-      </div>
-      <div class="setting-item">
-        <label>Version</label>
-        <span class="setting-value">0.2.0</span>
-      </div>
+      <!-- 左侧导航栏 -->
+      <nav class="settings-sidebar">
+        <div class="settings-sidebar-header">
+          <span class="settings-sidebar-title">设置</span>
+        </div>
+        <div class="settings-nav">
+          <button class="snav-item active" data-page="general">
+            <span class="snav-icon">⚙️</span>
+            <span class="snav-label">常规</span>
+          </button>
+          <button class="snav-item" data-page="hooks">
+            <span class="snav-icon">🔗</span>
+            <span class="snav-label">Hook 连接</span>
+          </button>
+          <button class="snav-item" data-page="window">
+            <span class="snav-icon">🖥️</span>
+            <span class="snav-label">窗口</span>
+          </button>
+          <button class="snav-item" data-page="about">
+            <span class="snav-icon">ℹ️</span>
+            <span class="snav-label">关于</span>
+          </button>
+          <button class="snav-item" data-page="log">
+            <span class="snav-icon">📋</span>
+            <span class="snav-label">事件日志</span>
+          </button>
+        </div>
+      </nav>
+      <!-- 右侧内容区 -->
+      <main class="settings-content">
+        <div class="settings-content-header">
+          <button class="settings-close" id="settingsClose" aria-label="Close settings">✕</button>
+        </div>
+        <!-- 常规 -->
+        <section class="spage active" id="spage-general">
+          <h2 class="spage-title">常规</h2>
+          <div class="setting-group">
+            <div class="setting-row">
+              <div class="setting-info">
+                <span class="setting-label">自动批准</span>
+                <span class="setting-desc">自动批准 Claude Code 的写操作请求，无需手动确认</span>
+              </div>
+              <label class="toggle">
+                <input type="checkbox" id="settAutoApprove" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+          </div>
+        </section>
+        <!-- Hook 连接 -->
+        <section class="spage" id="spage-hooks">
+          <h2 class="spage-title">Hook 连接</h2>
+          <div class="setting-group">
+            <div class="setting-row">
+              <div class="setting-info">
+                <span class="setting-label">连接状态</span>
+                <span class="setting-desc">Claude Code Hook 是否已配置</span>
+              </div>
+              <span class="status-badge" id="hookStatus">检查中...</span>
+            </div>
+            <div class="setting-row">
+              <div class="setting-info">
+                <span class="setting-label">监听端口</span>
+                <span class="setting-desc">VibeHub 本地 HTTP 服务端口</span>
+              </div>
+              <input type="text" class="setting-input" id="settPort" value="51789" readonly />
+            </div>
+            <div class="setting-row">
+              <div class="setting-info">
+                <span class="setting-label">Hook 脚本路径</span>
+                <span class="setting-desc">PowerShell hook 脚本位置</span>
+              </div>
+              <input type="text" class="setting-input wide" id="settHookPath" value="..." readonly />
+            </div>
+          </div>
+        </section>
+        <!-- 窗口 -->
+        <section class="spage" id="spage-window">
+          <h2 class="spage-title">窗口</h2>
+          <div class="setting-group">
+            <div class="setting-row">
+              <div class="setting-info">
+                <span class="setting-label">窗口置顶</span>
+                <span class="setting-desc">胶囊窗口始终保持在最上层</span>
+              </div>
+              <label class="toggle">
+                <input type="checkbox" id="settAlwaysOnTop" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+          </div>
+        </section>
+        <!-- 关于 -->
+        <section class="spage" id="spage-about">
+          <h2 class="spage-title">关于</h2>
+          <div class="setting-group">
+            <div class="setting-row">
+              <div class="setting-info"><span class="setting-label">版本</span></div>
+              <span class="setting-value">0.2.0</span>
+            </div>
+            <div class="setting-row">
+              <div class="setting-info"><span class="setting-label">技术栈</span></div>
+              <span class="setting-value">Tauri 2 + WebView2</span>
+            </div>
+            <div class="setting-row">
+              <div class="setting-info"><span class="setting-label">项目</span></div>
+              <span class="setting-value">AI Agent 工作中心</span>
+            </div>
+          </div>
+        </section>
+        <!-- 事件日志 -->
+        <section class="spage" id="spage-log">
+          <div class="spage-log-header">
+            <h2 class="spage-title">事件日志</h2>
+            <button class="log-clear-btn" id="logClear" title="清空日志">清空</button>
+          </div>
+          <div class="log-body" id="logBody" role="log" aria-live="polite"></div>
+        </section>
+      </main>
     </div>
 
     <script type="module" src="app.js"></script>
